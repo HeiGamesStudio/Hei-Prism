@@ -1,109 +1,290 @@
 HEI PRISM PROPRIETARY LICENSE
 Version 1.0
 
-Copyright (c) 2026 Hei Games Studio.
+Copyright © 2026 Hei Games Studio.
 All Rights Reserved.
 
-1. OWNERSHIP
+======================================================================
+1. SCOPE AND OWNERSHIP
+======================================================================
 
-Hei Prism, including its original code, user interface, branding,
-documentation, translations, configuration systems, and other original
-materials created specifically for the project, is the property of
+Hei Prism is proprietary software developed and distributed by
 Hei Games Studio.
 
-This license does not claim ownership of third-party software,
-libraries, components, trademarks, or other materials included in or
-used by Hei Prism. Such materials remain subject to their respective
-copyrights and licenses.
+This license applies only to the original portions of Hei Prism,
+including, where applicable:
 
-2. PERSONAL USE
+- original source code and compiled code created specifically for Hei Prism;
+- user interface and configuration systems;
+- original graphics, branding, logos, icons, and visual identity;
+- original documentation;
+- original translations and localization work;
+- original configuration files and project-specific resources.
 
-You may download, install, and use Hei Prism for personal,
-non-commercial purposes.
+Except for the limited permissions expressly granted by this license,
+all rights in the original Hei Prism materials are reserved by
+Hei Games Studio.
 
-You may use Hei Prism while playing single-player or multiplayer
-Minecraft, including on public and private servers.
+This license does not claim ownership of Minecraft, Fabric, or any
+third-party libraries, software, code, trademarks, assets, or other
+components used by or distributed with Hei Prism.
 
-3. VIDEOS AND CONTENT CREATION
+======================================================================
+2. PERMITTED USE
+======================================================================
 
-You may display Hei Prism in videos, livestreams, screenshots,
-reviews, tutorials, and other online content.
+You may download, install, and use Hei Prism free of charge for
+personal and non-commercial purposes.
 
-Monetization of such content is permitted, provided that you do not
-redistribute or sell Hei Prism itself.
+You may use Hei Prism:
 
-4. REDISTRIBUTION
+- in single-player Minecraft;
+- while connecting to public or private multiplayer servers;
+- on your own private or public Minecraft server as a client-side mod;
+- on multiple personal devices owned or controlled by you;
+- for testing, benchmarking, and personal experimentation.
 
-You may not redistribute, re-upload, mirror, republish, or otherwise
-make copies of Hei Prism available for download without prior written
-permission from Hei Games Studio.
+You may also create a reasonable number of backup copies for your
+own personal use.
 
-Users must obtain Hei Prism from an official distribution source
-approved by Hei Games Studio.
+======================================================================
+3. VIDEOS, STREAMS, REVIEWS, AND SCREENSHOTS
+======================================================================
 
-Official distribution sources may include Modrinth, CurseForge,
-GitHub, or other platforms explicitly designated by Hei Games Studio.
+You may show Hei Prism in:
 
-5. MODIFICATION AND DERIVATIVE VERSIONS
+- videos;
+- livestreams;
+- tutorials;
+- reviews;
+- screenshots;
+- social-media content;
+- articles and other informational content.
 
-You may not distribute modified versions, forks, derivatives, or
-repackaged versions of Hei Prism without prior written permission
-from Hei Games Studio.
+Such content may be monetized.
 
-You may not present any modified or redistributed version as an
-official Hei Prism release.
+This permission does not allow you to redistribute, sell, sublicense,
+or otherwise provide the Hei Prism software itself for download.
 
-6. COMMERCIAL USE
+======================================================================
+4. OFFICIAL DISTRIBUTION
+======================================================================
 
-You may not sell, sublicense, rent, commercially redistribute, or
-include Hei Prism in a paid product or service without prior written
-permission from Hei Games Studio.
+Official releases of Hei Prism must be obtained from distribution
+sources authorized by Hei Games Studio.
 
-7. CREDITS AND IDENTITY
+Authorized sources may include:
 
-You may not remove, obscure, or falsify copyright notices, credits,
-project identity, or licensing information belonging to Hei Prism.
+- Modrinth;
+- CurseForge;
+- other platforms explicitly designated by Hei Games Studio.
 
-You may not claim authorship or ownership of Hei Prism.
+You may link directly to an official Hei Prism download page.
 
-8. THIRD-PARTY COMPONENTS
+You may not re-upload, mirror, republish, redistribute, or otherwise
+make the Hei Prism JAR or other official release files available for
+download from another location without prior written permission from
+Hei Games Studio.
 
-Hei Prism may contain or interact with third-party software and
-components.
+======================================================================
+5. MODPACKS
+======================================================================
 
-Those components remain governed by their respective licenses and
-copyright holders.
+You may reference Hei Prism in modpacks and modpack documentation.
 
-Nothing in this license restricts rights granted independently by
-those third-party licenses.
+Whenever technically possible, users must obtain Hei Prism through
+an official distribution source.
 
-9. NO WARRANTY
+Bundling, embedding, or redistributing the Hei Prism JAR directly
+inside a modpack requires prior written permission from
+Hei Games Studio unless an authorized distribution platform handles
+the download directly from an official Hei Prism source.
 
-Hei Prism is provided "AS IS", without warranty of any kind, express
-or implied.
+======================================================================
+6. MODIFICATION, FORKS, AND DERIVATIVE VERSIONS
+======================================================================
 
-Hei Games Studio does not guarantee compatibility, uninterrupted
-operation, performance, or suitability for any particular purpose.
+You may not publicly distribute:
 
-10. LIMITATION OF LIABILITY
+- modified versions of Hei Prism;
+- forks of Hei Prism;
+- repackaged builds;
+- unofficial ports;
+- patched releases;
+- derivative distributions based on proprietary Hei Prism materials;
+
+without prior written permission from Hei Games Studio.
+
+You may not present any modified, unofficial, or third-party build as
+an official Hei Prism release.
+
+Private modification for personal experimentation does not grant any
+right to redistribute the resulting files.
+
+======================================================================
+7. REVERSE ENGINEERING
+======================================================================
+
+Except where applicable law expressly provides otherwise, you may not
+reverse engineer, decompile, disassemble, or otherwise attempt to
+recover proprietary Hei Prism source code for the purpose of creating,
+distributing, or commercializing a competing or derivative version.
+
+Nothing in this section limits rights that cannot legally be restricted
+under applicable law.
+
+======================================================================
+8. COMMERCIAL USE
+======================================================================
+
+You may not, without prior written permission from Hei Games Studio:
+
+- sell Hei Prism;
+- sell access to Hei Prism;
+- sublicense Hei Prism;
+- rent or lease Hei Prism;
+- commercially redistribute Hei Prism;
+- include Hei Prism as part of a paid software product;
+- charge users specifically for access to Hei Prism.
+
+This restriction does not prohibit monetized videos, streams, reviews,
+or other media content permitted under Section 3.
+
+======================================================================
+9. IDENTITY, CREDITS, AND BRANDING
+======================================================================
+
+You may not:
+
+- claim authorship or ownership of Hei Prism;
+- impersonate Hei Games Studio;
+- present an unofficial version as an official Hei Prism release;
+- remove or falsify copyright notices;
+- remove or falsify licensing information;
+- use the Hei Prism name or branding in a way that falsely suggests
+  official endorsement, partnership, or ownership.
+
+No trademark or branding rights are granted except as necessary to
+truthfully identify Hei Prism when discussing or reviewing the mod.
+
+======================================================================
+10. THIRD-PARTY SOFTWARE AND COMPONENTS
+======================================================================
+
+Hei Prism may include, bundle, interface with, or depend upon
+third-party software and components.
+
+Third-party materials are not relicensed under the
+Hei Prism Proprietary License.
+
+They remain governed by their own copyright holders and their
+respective licenses.
+
+This includes, where applicable, components associated with projects
+such as:
+
+- Iris;
+- Sodium;
+- ImmediatelyFast;
+- Fabric;
+- Minecraft;
+- other third-party libraries or technologies.
+
+Nothing in this license removes, reduces, replaces, or overrides any
+rights or obligations granted by an applicable third-party license.
+
+Where required, third-party license notices must remain intact.
+
+======================================================================
+11. NO TRANSFER OF THIRD-PARTY RIGHTS
+======================================================================
+
+Hei Games Studio grants rights only to materials it owns or has the
+authority to license.
+
+This license does not grant rights to third-party trademarks, code,
+assets, libraries, or other intellectual property merely because such
+materials interact with, are referenced by, or are distributed
+alongside Hei Prism.
+
+======================================================================
+12. NO WARRANTY
+======================================================================
+
+HEI PRISM IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, TO THE MAXIMUM EXTENT PERMITTED BY LAW.
+
+HEI GAMES STUDIO DOES NOT GUARANTEE THAT HEI PRISM WILL:
+
+- operate without errors;
+- be compatible with every Minecraft version;
+- be compatible with every mod, shaderpack, driver, graphics card,
+  operating system, or mod loader;
+- provide uninterrupted operation;
+- meet any particular performance requirement.
+
+Use of Hei Prism is at the user's own risk.
+
+======================================================================
+13. LIMITATION OF LIABILITY
+======================================================================
 
 To the maximum extent permitted by applicable law, Hei Games Studio
-shall not be liable for any direct, indirect, incidental, special, or
-consequential damages arising from the installation or use of Hei
-Prism.
+shall not be liable for direct, indirect, incidental, special,
+consequential, or other damages arising from the installation,
+configuration, use, inability to use, modification, or interaction of
+Hei Prism with other software.
 
-11. PERMISSIONS
+Users are responsible for maintaining appropriate backups of their
+Minecraft installations, worlds, configuration files, and other data.
 
-Additional permissions may be granted in writing by Hei Games Studio.
+======================================================================
+14. TERMINATION
+======================================================================
 
-12. LICENSE VERSION
+The permissions granted by this license terminate automatically if
+you materially violate its terms.
 
-Hei Games Studio may publish revised versions of this license for
-future releases of Hei Prism.
+Upon termination, you must stop any unauthorized redistribution,
+commercialization, or other prohibited activity involving Hei Prism.
 
-A release remains governed by the license version distributed with
-that release unless otherwise stated.
+Termination does not affect rights independently granted to you under
+applicable third-party licenses.
+
+======================================================================
+15. ADDITIONAL PERMISSIONS
+======================================================================
+
+Hei Games Studio may grant additional permissions on a case-by-case
+basis.
+
+Any permission outside the terms of this license must be granted by
+Hei Games Studio in writing.
+
+======================================================================
+16. FUTURE LICENSE VERSIONS
+======================================================================
+
+Hei Games Studio may publish updated versions of the
+Hei Prism Proprietary License.
+
+Unless explicitly stated otherwise, a release of Hei Prism remains
+governed by the license version distributed with that release.
+
+A newer license version does not automatically replace the license
+attached to an older release.
+
+======================================================================
+17. RIGHTS RESERVED
+======================================================================
+
+Any right not expressly granted by this license is reserved by
+Hei Games Studio.
+
+For permissions not granted by this license, contact Hei Games Studio.
+
+======================================================================
 
 Hei Prism Proprietary License v1.0
-Copyright (c) 2026 Hei Games Studio.
+Copyright © 2026 Hei Games Studio.
 All Rights Reserved.
