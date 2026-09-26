@@ -5,7 +5,7 @@ using System.Linq;
 using System.Reflection;
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(SR1SlimesStandalone.ModEntry), "SR1 Slimes Standalone", "0.4.0", "Hei Games Studio")]
+[assembly: MelonInfo(typeof(SR1SlimesStandalone.ModEntry), "SR1 Slimes Standalone", "0.5.0", "Hei Games Studio")]
 [assembly: MelonGame("MonomiPark", "SlimeRancher2")]
 
 namespace SR1SlimesStandalone
@@ -61,10 +61,40 @@ namespace SR1SlimesStandalone
 
         public override void OnInitializeMelon()
         {
-            LoggerInstance.Msg("SR1 Slimes Standalone v0.4 iniciado. Sem Custom Slime Creator.");
+            LoggerInstance.Msg("SR1 Slimes Standalone v0.5 iniciado. Sem Custom Slime Creator.");
             LoggerInstance.Msg("Hotkeys: 8 = Rad, 9 = Quantum, 0 = Mosaic.");
-            _status = "SR1 Slimes v0.4: criando 3 slimes locais... 8 Rad | 9 Quantum | 0 Mosaic";
+            _status = "SR1 Slimes v0.5: preparando recuperação + slimes locais...";
             _statusUntil = DateTime.UtcNow.AddSeconds(15);
+        }
+
+        public override void OnSceneWasInitialized(int buildIndex, string sceneName)
+        {
+            try
+            {
+                if (!_ready) _ready = EnsureReady();
+                if (_ready)
+                {
+                    Show("RECUPERACAO PRONTA — IDs Rad/Quantum/Mosaic registrados.", 8);
+                    LoggerInstance.Msg("Registro antecipado pronto na cena: " + sceneName);
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.Warning("Bootstrap de cena: " + ex.Message);
+            }
+        }
+
+        public override void OnSceneWasLoaded(int buildIndex, string sceneName)
+        {
+            try
+            {
+                if (!_ready) _ready = EnsureReady();
+                if (_ready) InjectNaturalSpawns();
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.Warning("Scene load: " + ex.Message);
+            }
         }
 
         public override void OnUpdate()
@@ -92,6 +122,9 @@ namespace SR1SlimesStandalone
                         LoggerInstance.Msg("Entradas da Slimepedia instaladas.");
                     }
                 }
+
+                if (_ready && _tick % 180 == 0)
+                    InjectNaturalSpawns();
 
                 if (KeyPressed("digit8Key","numpad8Key","Alpha8","Keypad8")) Spawn("Rad");
                 if (KeyPressed("digit9Key","numpad9Key","Alpha9","Keypad9")) Spawn("Quantum");
@@ -216,6 +249,7 @@ namespace SR1SlimesStandalone
                 if (def == null) return null;
 
                 SetMember(def, "name", "SR1" + s.Key + "Slime");
+                PinObject(def);
                 ForceReferenceId(def, s.RefId);
 
                 var ln = MakeLocalized("Actor", "sr1slimes.name." + s.Key.ToLowerInvariant(), s.Display);
@@ -228,6 +262,7 @@ namespace SR1SlimesStandalone
 
                 TryCall(prefab, "SetActive", false);
                 SetMember(prefab, "name", "SR1" + s.Key + "SlimePrefab");
+                PinObject(prefab);
                 WirePrefab(prefab, def);
                 SetMember(def, "prefab", prefab);
 
@@ -242,6 +277,12 @@ namespace SR1SlimesStandalone
                 LoggerInstance.Error("Build " + s.Key + ": " + ex);
                 return null;
             }
+        }
+
+        private static void PinObject(object obj)
+        {
+            if (obj == null) return;
+            try { SetMember(obj, "hideFlags", 32); } catch { }
         }
 
         private void ForceReferenceId(object def, string refId)
@@ -389,6 +430,7 @@ namespace SR1SlimesStandalone
                     entry = InstantiateObject(pinkEntry);
                     if (entry == null) return false;
                     SetMember(entry, "name", wantedName);
+                    PinObject(entry);
                     SetMember(entry, "_identifiableType", def);
                     var title = GetMember(def, "localizedName");
                     if (title != null) SetMember(entry, "_title", title);
@@ -457,6 +499,110 @@ namespace SR1SlimesStandalone
             catch { }
         }
 
+        private void InjectNaturalSpawns()
+        {
+            try
+            {
+                var spawnerType = FindTypeBySimpleName("DirectedSlimeSpawner");
+                if (spawnerType == null) return;
+
+                int touched = 0;
+                foreach (var spawner in FindAllResources(spawnerType))
+                {
+                    if (spawner == null) continue;
+                    var go = GetMember(spawner, "gameObject");
+                    if (go == null) continue;
+                    var scene = GetMember(go, "scene");
+                    var sceneName = scene == null ? null : GetString(scene, "name");
+                    if (string.IsNullOrEmpty(sceneName)) continue;
+
+                    bool radHere =
+                        sceneName.IndexOf("zoneGorge_Area4", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        sceneName.IndexOf("zoneGorge_Area5", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        sceneName.IndexOf("LabValley", StringComparison.OrdinalIgnoreCase) >= 0;
+
+                    bool qmHere =
+                        sceneName.IndexOf("zoneLabyrinthTerrarium", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        sceneName.IndexOf("zoneRainbowCore", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        sceneName.IndexOf("zoneLabyrinthHub", StringComparison.OrdinalIgnoreCase) >= 0;
+
+                    if (radHere && _defs.TryGetValue("Rad", out var rad))
+                        if (AddIdentToSpawner(spawner, rad, 0.35f)) touched++;
+
+                    if (qmHere)
+                    {
+                        if (_defs.TryGetValue("Quantum", out var quantum))
+                            if (AddIdentToSpawner(spawner, quantum, 0.22f)) touched++;
+                        if (_defs.TryGetValue("Mosaic", out var mosaic))
+                            if (AddIdentToSpawner(spawner, mosaic, 0.22f)) touched++;
+                    }
+                }
+
+                if (touched > 0)
+                    LoggerInstance.Msg("Spawns naturais atualizados em " + touched + " conjunto(s).");
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.Warning("Natural spawn: " + ex.Message);
+            }
+        }
+
+        private bool AddIdentToSpawner(object spawner, object def, float weight)
+        {
+            try
+            {
+                var constraints = GetMember(spawner, "Constraints") as IEnumerable;
+                if (constraints == null) return false;
+                bool changed = false;
+
+                foreach (var constraint in constraints)
+                {
+                    if (constraint == null) continue;
+                    var slimeSet = GetMember(constraint, "Slimeset");
+                    if (slimeSet == null) continue;
+                    var members = GetMember(slimeSet, "Members");
+                    if (members == null) continue;
+
+                    bool exists = false;
+                    Type memberType = null;
+                    if (members is IEnumerable en)
+                    {
+                        foreach (var m in en)
+                        {
+                            if (m == null) continue;
+                            if (memberType == null) memberType = m.GetType();
+                            var ident = GetMember(m, "IdentType");
+                            if (ident != null && (ReferenceEquals(ident, def) || ident.Equals(def)))
+                            {
+                                exists = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (exists) continue;
+
+                    if (memberType == null)
+                    {
+                        var setType = slimeSet.GetType();
+                        memberType = setType.GetNestedType("Member", BindingFlags.Public|BindingFlags.NonPublic);
+                    }
+                    if (memberType == null) continue;
+
+                    object member = null;
+                    try { member = Activator.CreateInstance(memberType); } catch { }
+                    if (member == null) continue;
+
+                    SetMember(member, "_prefab", GetMember(def, "prefab", "Prefab"));
+                    SetMember(member, "IdentType", def);
+                    SetMember(member, "Weight", weight);
+                    AppendMemberCollection(slimeSet, "Members", member);
+                    changed = true;
+                }
+                return changed;
+            }
+            catch { return false; }
+        }
+
         private void Spawn(string key)
         {
             try
@@ -466,7 +612,7 @@ namespace SR1SlimesStandalone
                     _ready = EnsureReady();
                     if (!_ready)
                     {
-                        Show("Ainda preparando os slimes locais. Tente de novo em 1 segundo.", 3);
+                        Show("Ainda preparando os slimes locais. Tente novamente em 1 segundo.", 3);
                         return;
                     }
                 }
@@ -506,6 +652,7 @@ namespace SR1SlimesStandalone
                     if (e != null) TryCall(e,"CalculateAllEats");
                 }
 
+                if (!_pediaReady) _pediaReady = TryInstallAllPedia();
                 if (!_pediaReady) _pediaReady = TryInstallAllPedia();
                 Show(s.Display + " spawnado!   8 Rad | 9 Quantum | 0 Mosaic", 3);
                 LoggerInstance.Msg(s.Display + " spawnado.");
@@ -731,6 +878,10 @@ namespace SR1SlimesStandalone
         {
             if(value==null) return null;
             if(target.IsInstanceOfType(value)) return value;
+            if(target.IsEnum)
+            {
+                try { return Enum.ToObject(target, Convert.ToInt32(value)); } catch { }
+            }
             try
             {
                 foreach(var m in target.GetMethods(BindingFlags.Public|BindingFlags.Static))
