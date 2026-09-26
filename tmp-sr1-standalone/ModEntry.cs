@@ -376,7 +376,7 @@ namespace SR1SlimesStandalone
             {
                 var sceneType = FindType("Il2CppMonomiPark.SlimeRancher.SceneContext") ?? FindTypeBySimpleName("SceneContext");
                 if (sceneType == null) return;
-                var scene = GetMember(sceneType, null, "Instance");
+                var scene = GetStaticMember(sceneType, "Instance");
                 if (scene == null) return;
                 var dir = GetMember(scene, "PediaDirector");
                 if (dir == null) return;
@@ -457,7 +457,7 @@ namespace SR1SlimesStandalone
             try
             {
                 var sceneType = FindType("Il2CppMonomiPark.SlimeRancher.SceneContext") ?? FindTypeBySimpleName("SceneContext");
-                var scene = sceneType == null ? null : GetMember(sceneType, null, "Instance");
+                var scene = sceneType == null ? null : GetStaticMember(sceneType, "Instance");
                 if (scene == null) return null;
                 var modelSvc = GetMember(scene, "GameModel");
                 var registry = GetMember(scene, "RegionRegistry");
@@ -493,12 +493,12 @@ namespace SR1SlimesStandalone
             var v3 = FindType("UnityEngine.Vector3");
             var quat = FindType("UnityEngine.Quaternion");
             pos = Activator.CreateInstance(v3, new object[]{0f,5f,0f});
-            rot = GetMember(quat, null, "identity");
+            rot = GetStaticMember(quat, "identity");
 
             try
             {
                 var camType=FindType("UnityEngine.Camera");
-                var cam=GetMember(camType,null,"main");
+                var cam=GetStaticMember(camType, "main");
                 if(cam==null) return;
                 var tr=GetMember(cam,"transform");
                 var p=GetMember(tr,"position");
@@ -577,7 +577,7 @@ namespace SR1SlimesStandalone
             {
                 var settings=FindType("UnityEngine.Localization.Settings.LocalizationSettings");
                 if(settings==null) return null;
-                var db=GetMember(settings,null,"StringDatabase");
+                var db=GetStaticMember(settings, "StringDatabase");
                 if(db==null) return null;
 
                 object table=null;
@@ -700,7 +700,7 @@ namespace SR1SlimesStandalone
             try
             {
                 var kt=FindType("UnityEngine.InputSystem.Keyboard");
-                var kb=kt==null?null:GetMember(kt,null,"current");
+                var kb=kt==null?null:GetStaticMember(kt, "current");
                 if(kb!=null && (ControlPressed(kb,primary)||ControlPressed(kb,secondary))) return true;
             }
             catch { }
@@ -787,9 +787,12 @@ namespace SR1SlimesStandalone
         }
 
         private static object GetMember(object obj, params string[] names)
-            => obj==null?null:GetMember(obj.GetType(),obj,names);
+            => obj==null?null:GetMemberCore(obj.GetType(),obj,names);
 
-        private static object GetMember(Type type, object instance, params string[] names)
+        private static object GetStaticMember(Type type, params string[] names)
+            => GetMemberCore(type,null,names);
+
+        private static object GetMemberCore(Type type, object instance, params string[] names)
         {
             if(type==null) return null;
             const BindingFlags f=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.Static;
