@@ -529,7 +529,7 @@ namespace SR1SlimesStandalone
                     }
             }
 
-            var top=MakeColor(colorType,s.Top), mid=MakeColor(colorType,s.Mid), bottom=MakeColor(colorType,s.Bottom);
+            var top=MakeColor(colorType,s.Top);\n            var mid=MakeColor(colorType,s.Mid);\n            var bottom=MakeColor(colorType,s.Bottom);
             var white=MakeColor(colorType,new[]{1f,1f,1f,1f});
 
             foreach(var r in GetComponentsInChildren(go,rendererType))
