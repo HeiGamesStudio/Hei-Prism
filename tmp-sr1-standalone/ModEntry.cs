@@ -5,7 +5,7 @@ using System.Linq;
 using System.Reflection;
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(SR1SlimesStandalone.ModEntry), "SR1 Slimes Standalone", "0.5.0", "Hei Games Studio")]
+[assembly: MelonInfo(typeof(SR1SlimesStandalone.ModEntry), "SR1 Slimes Standalone", "0.7.0", "Hei Games Studio")]
 [assembly: MelonGame("MonomiPark", "SlimeRancher2")]
 
 namespace SR1SlimesStandalone
@@ -61,9 +61,9 @@ namespace SR1SlimesStandalone
 
         public override void OnInitializeMelon()
         {
-            LoggerInstance.Msg("SR1 Slimes Standalone v0.5 iniciado. Sem Custom Slime Creator.");
+            LoggerInstance.Msg("SR1 Slimes Standalone v0.7 iniciado. IDs reais + compatibilidade com saves antigos.");
             LoggerInstance.Msg("Hotkeys: 8 = Rad, 9 = Quantum, 0 = Mosaic.");
-            _status = "SR1 Slimes v0.5: preparando recuperação + slimes locais...";
+            _status = "SR1 Slimes v0.7: criando Rad, Quantum e Mosaic REAIS...";
             _statusUntil = DateTime.UtcNow.AddSeconds(15);
         }
 
@@ -74,7 +74,7 @@ namespace SR1SlimesStandalone
                 if (!_ready) _ready = EnsureReady();
                 if (_ready)
                 {
-                    Show("RECUPERACAO PRONTA — IDs Rad/Quantum/Mosaic registrados.", 8);
+                    Show("SR1 SLIMES PRONTOS — IDs reais registrados; saves antigos compatíveis.", 8);
                     LoggerInstance.Msg("Registro antecipado pronto na cena: " + sceneName);
                 }
             }
@@ -255,6 +255,18 @@ namespace SR1SlimesStandalone
                 var ln = MakeLocalized("Actor", "sr1slimes.name." + s.Key.ToLowerInvariant(), s.Display);
                 if (ln != null) SetMember(def, "localizedName", ln);
 
+                // Give the species its OWN appearance instead of sharing Pink's appearance.
+                var customApp = CloneAppearanceFor(s);
+                if (customApp != null)
+                {
+                    var baseApps = GetMember(_pinkDef, "AppearancesDefault");
+                    if (baseApps != null)
+                    {
+                        var apps = CreateCollection(baseApps.GetType(), new List<object> { customApp });
+                        if (apps != null) SetMember(def, "AppearancesDefault", apps);
+                    }
+                }
+
                 var basePrefab = GetMember(_pinkDef, "prefab", "Prefab");
                 if (basePrefab == null) return null;
                 var prefab = InstantiateObject(basePrefab);
@@ -263,13 +275,21 @@ namespace SR1SlimesStandalone
                 TryCall(prefab, "SetActive", false);
                 SetMember(prefab, "name", "SR1" + s.Key + "SlimePrefab");
                 PinObject(prefab);
-                WirePrefab(prefab, def);
                 SetMember(def, "prefab", prefab);
+                WirePrefab(prefab, def);
 
-                RegisterSlime(def);
+                // Register canonical ID + every ID used by our earlier test builds.
+                RegisterSlime(def, OldSlimeAlias(s.Key));
+
+                // Also recover/create a real species plort instead of mapping it to Pink Plort.
+                var plort = BuildPlortFor(s);
+                if (plort != null)
+                    TryWireProduceIdent(def, plort);
+
                 _prefabs[s.Key] = prefab;
+                Recolor(prefab, s);
 
-                LoggerInstance.Msg("Criado " + s.Display + " standalone.");
+                LoggerInstance.Msg("Criado " + s.Display + " com ID real " + s.RefId + ".");
                 return def;
             }
             catch (Exception ex)
@@ -304,7 +324,261 @@ namespace SR1SlimesStandalone
             return FindFirstResource(t);
         }
 
-        private void RegisterSlime(object def)
+        private static string OldSlimeAlias(string key)
+            => "SlimeDefinition.Custom" + key + "Slime";
+
+        private static string PrimaryPlortId(string key)
+            => "IdentifiableType.SR1" + key + "Plort";
+
+        private static string OldPlortAlias(string key)
+            => "IdentifiableType.Custom" + key + "SlimePlort";
+
+        private void EnsurePersistenceAlias(object pid, string id)
+        {
+            if (pid == null || string.IsNullOrWhiteSpace(id)) return;
+            var primary = GetMember(pid, "_primaryIndex");
+            int index = IndexOfString(primary, id);
+            if (index < 0)
+            {
+                index = CollectionCount(primary);
+                AppendMemberCollection(pid, "_primaryIndex", id);
+            }
+            var rev = GetMember(pid, "_reverseIndex");
+            if (!DictContains(rev, id)) DictAdd(rev, id, index);
+            else DictSet(rev, id, index);
+        }
+
+        private static int IndexOfString(object collection, string value)
+        {
+            if (collection is IEnumerable en)
+            {
+                int i = 0;
+                foreach (var x in en)
+                {
+                    if (string.Equals(x?.ToString(), value, StringComparison.Ordinal)) return i;
+                    i++;
+                }
+            }
+            return -1;
+        }
+
+        private static int CollectionCount(object collection)
+        {
+            if (collection == null) return 0;
+            var v = GetMember(collection, "Count", "Length");
+            try { return Convert.ToInt32(v); } catch { }
+            int n = 0;
+            if (collection is IEnumerable en) foreach (var _ in en) n++;
+            return n;
+        }
+
+        private object CloneAppearanceFor(Spec spec)
+        {
+            try
+            {
+                var baseApps = GetMember(_pinkDef, "AppearancesDefault");
+                var baseApp = FirstOf(baseApps);
+                if (baseApp == null) return null;
+
+                var app = InstantiateObject(baseApp);
+                if (app == null) return null;
+                PinObject(app);
+                SetMember(app, "name", "SR1_App_" + spec.Key);
+
+                var structs = GetMember(baseApp, "Structures");
+                if (structs is IEnumerable en)
+                {
+                    var cloned = new List<object>();
+                    foreach (var bs in en)
+                    {
+                        if (bs == null) continue;
+                        object ns = null;
+                        try
+                        {
+                            var ctor = bs.GetType().GetConstructor(new[] { bs.GetType() });
+                            if (ctor != null) ns = ctor.Invoke(new[] { bs });
+                        }
+                        catch { }
+                        if (ns == null) continue;
+
+                        var mats = GetMember(bs, "DefaultMaterials");
+                        if (mats is IEnumerable men)
+                        {
+                            var newMats = new List<object>();
+                            foreach (var m in men)
+                            {
+                                var nm = m == null ? null : InstantiateObject(m);
+                                if (nm != null) RecolorMaterial(nm, spec);
+                                newMats.Add(nm);
+                            }
+                            if (mats != null)
+                            {
+                                var mcol = CreateCollection(mats.GetType(), newMats);
+                                if (mcol != null) SetMember(ns, "DefaultMaterials", mcol);
+                            }
+                        }
+                        cloned.Add(ns);
+                    }
+
+                    if (cloned.Count > 0 && structs != null)
+                    {
+                        var scol = CreateCollection(structs.GetType(), cloned);
+                        if (scol != null) SetMember(app, "Structures", scol);
+                    }
+                }
+                return app;
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.Warning("Appearance " + spec.Key + ": " + ex.Message);
+                return null;
+            }
+        }
+
+        private object BuildPlortFor(Spec spec)
+        {
+            try
+            {
+                var plortType = FindTypeBySimpleName("IdentifiableType");
+                if (plortType == null) return null;
+
+                object basePlort = null;
+                foreach (var p in FindAllResources(plortType))
+                {
+                    var n = GetString(p, "name", "Name") ?? "";
+                    var r = GetString(p, "ReferenceId", "referenceId") ?? "";
+                    if (string.Equals(n, "PinkPlort", StringComparison.OrdinalIgnoreCase) ||
+                        r.IndexOf("PinkPlort", StringComparison.OrdinalIgnoreCase) >= 0)
+                    { basePlort = p; break; }
+                }
+                if (basePlort == null) return null;
+
+                var plort = InstantiateObject(basePlort);
+                if (plort == null) return null;
+                PinObject(plort);
+                SetMember(plort, "name", "SR1" + spec.Key + "Plort");
+                ForceReferenceId(plort, PrimaryPlortId(spec.Key));
+
+                var l = MakeLocalized("Actor", "sr1slimes.plort." + spec.Key.ToLowerInvariant(), spec.Display + " Plort");
+                if (l != null) SetMember(plort, "localizedName", l);
+
+                var basePrefab = GetMember(basePlort, "prefab", "Prefab");
+                if (basePrefab != null)
+                {
+                    var pf = InstantiateObject(basePrefab);
+                    if (pf != null)
+                    {
+                        PinObject(pf);
+                        SetMember(pf, "name", "SR1" + spec.Key + "PlortPrefab");
+                        foreach (var ia in GetComponentsInChildren(pf, FindTypeBySimpleName("IdentifiableActor")))
+                            SetMember(ia, "identType", plort);
+                        SetMember(plort, "prefab", pf);
+                        Recolor(pf, spec);
+                    }
+                }
+
+                RegisterIdentifiable(plort, PrimaryPlortId(spec.Key), OldPlortAlias(spec.Key));
+                return plort;
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.Warning("Plort " + spec.Key + ": " + ex.Message);
+                return null;
+            }
+        }
+
+        private void RegisterIdentifiable(object ident, string primaryId, params string[] aliases)
+        {
+            var gc = GetGameContext();
+            if (gc == null || ident == null) return;
+            var lookup = GetMember(gc, "LookupDirector");
+            var asd = GetMember(gc, "AutoSaveDirector");
+            if (lookup == null || asd == null) return;
+
+            var ids = new List<string> { primaryId };
+            if (aliases != null)
+                foreach (var a in aliases)
+                    if (!string.IsNullOrWhiteSpace(a) && !ids.Contains(a)) ids.Add(a);
+
+            var map = GetMember(lookup, "_identifiableTypeByRefId");
+            var trans = GetMember(asd, "_saveReferenceTranslation");
+            var identLookup = trans == null ? null : GetMember(trans, "_identifiableTypeLookup");
+            var pid = trans == null ? null : GetMember(trans, "_identifiableTypeToPersistenceId");
+
+            foreach (var id in ids)
+            {
+                DictSet(map, id, ident);
+                DictSet(identLookup, id, ident);
+                EnsurePersistenceAlias(pid, id);
+            }
+
+            var cfg = GetMember(asd, "_configuration");
+            var master = cfg == null ? null : GetMember(cfg, "_identifiableTypes");
+            if (master != null) InvokeBest(lookup, "AddIdentifiableTypeToGroup", ident, master);
+
+            var groupType = FindTypeBySimpleName("IdentifiableTypeGroup");
+            if (groupType != null)
+            {
+                var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
+                    "PlortGroup","VaccablePlortGroup","IdentifiableTypesGroup","PlortsGroup"
+                };
+                foreach (var g in FindAllResources(groupType))
+                {
+                    var n = GetString(g, "name", "Name");
+                    if (n != null && wanted.Contains(n))
+                        InvokeBest(lookup, "AddIdentifiableTypeToGroup", ident, g);
+                }
+            }
+        }
+
+        private void TryWireProduceIdent(object def, object plort)
+        {
+            try
+            {
+                var diet = GetMember(def, "Diet");
+                if (diet == null) return;
+                var old = GetMember(diet, "ProduceIdents");
+                if (old == null) return;
+                var arr = CreateCollection(old.GetType(), new List<object> { plort });
+                if (arr != null) SetMember(diet, "ProduceIdents", arr);
+            }
+            catch { }
+        }
+
+        private void RecolorMaterial(object m, Spec spec)
+        {
+            if (m == null) return;
+            var shaderType = FindType("UnityEngine.Shader");
+            var colorType = FindType("UnityEngine.Color");
+            if (colorType == null) return;
+
+            object shader = null;
+            if (shaderType != null)
+            {
+                var find = shaderType.GetMethods(BindingFlags.Public|BindingFlags.Static)
+                    .FirstOrDefault(x => x.Name == "Find" && x.GetParameters().Length == 1);
+                if (find != null)
+                {
+                    foreach (var n in spec.ShaderNames)
+                    {
+                        try { shader = find.Invoke(null, new object[]{n}); if (shader != null) break; } catch { }
+                    }
+                }
+            }
+            if (shader != null) SetMember(m, "shader", shader);
+
+            var top = MakeColor(colorType, spec.Top);
+            var mid = MakeColor(colorType, spec.Mid);
+            var bottom = MakeColor(colorType, spec.Bottom);
+            SetMatColor(m, "_TopColor", top);
+            SetMatColor(m, "_MiddleColor", mid);
+            SetMatColor(m, "_BottomColor", bottom);
+            SetMatColor(m, "_SpecColor", mid);
+            SetMatColor(m, "_Color", mid);
+            SetMatColor(m, "_BaseColor", mid);
+        }
+
+        private void RegisterSlime(object def, params string[] aliases)
         {
             var gc = GetGameContext();
             if (gc == null) return;
@@ -321,10 +595,17 @@ namespace SR1SlimesStandalone
                 AppendMemberCollection(defs, "Slimes", def);
             }
 
+            var allIds = new List<string>();
+            if (!string.IsNullOrEmpty(refId)) allIds.Add(refId);
+            if (aliases != null)
+                foreach (var a in aliases)
+                    if (!string.IsNullOrWhiteSpace(a) && !allIds.Contains(a))
+                        allIds.Add(a);
+
             if (lookup != null)
             {
                 var map = GetMember(lookup, "_identifiableTypeByRefId");
-                if (!string.IsNullOrEmpty(refId)) DictAddIfMissing(map, refId, def);
+                foreach (var id in allIds) DictSet(map, id, def);
             }
 
             if (lookup != null && asd != null)
@@ -334,16 +615,14 @@ namespace SR1SlimesStandalone
                 if (allGroup != null) InvokeBest(lookup, "AddIdentifiableTypeToGroup", def, allGroup);
 
                 var trans = GetMember(asd, "_saveReferenceTranslation");
-                if (trans != null && !string.IsNullOrEmpty(refId))
+                if (trans != null)
                 {
-                    DictAddIfMissing(GetMember(trans, "_identifiableTypeLookup"), refId, def);
+                    var identLookup = GetMember(trans, "_identifiableTypeLookup");
                     var pid = GetMember(trans, "_identifiableTypeToPersistenceId");
-                    if (pid != null)
+                    foreach (var id in allIds)
                     {
-                        AppendMemberCollection(pid, "_primaryIndex", refId);
-                        var rev = GetMember(pid, "_reverseIndex");
-                        if (!DictContains(rev, refId))
-                            DictAdd(rev, refId, DictCount(rev));
+                        DictSet(identLookup, id, def);
+                        if (pid != null) EnsurePersistenceAlias(pid, id);
                     }
                 }
             }
@@ -454,7 +733,7 @@ namespace SR1SlimesStandalone
                 if (runtime != null)
                     AddToLiveCollection(GetMember(runtime, "_items", "Items"), entry);
 
-                var gc = FindFirstResource(FindType("Il2CppMonomiPark.SlimeRancher.GameContext") ?? FindTypeBySimpleName("GameContext"));
+                var gc = GetGameContext();
                 var lookup = gc == null ? null : GetMember(gc, "LookupDirector");
                 if (lookup != null)
                     InvokeBest(lookup, "AddPediaEntryToCategory", entry, slimesCategory);
@@ -653,7 +932,6 @@ namespace SR1SlimesStandalone
                 }
 
                 if (!_pediaReady) _pediaReady = TryInstallAllPedia();
-                if (!_pediaReady) _pediaReady = TryInstallAllPedia();
                 Show(s.Display + " spawnado!   8 Rad | 9 Quantum | 0 Mosaic", 3);
                 LoggerInstance.Msg(s.Display + " spawnado.");
             }
@@ -755,13 +1033,7 @@ namespace SR1SlimesStandalone
                     if(m==null) continue;
                     bool body=HasMatProp(m,"_TopColor")||HasMatProp(m,"_MiddleColor")||HasMatProp(m,"_BottomColor");
                     if(!body) continue;
-                    if(shader!=null) SetMember(m,"shader",shader);
-                    SetMatColor(m,"_TopColor",top);
-                    SetMatColor(m,"_MiddleColor",mid);
-                    SetMatColor(m,"_BottomColor",bottom);
-                    SetMatColor(m,"_SpecColor",white);
-                    SetMatColor(m,"_Color",mid);
-                    SetMatColor(m,"_BaseColor",mid);
+                    RecolorMaterial(m, s);
                 }
             }
         }
