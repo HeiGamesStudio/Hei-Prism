@@ -5,7 +5,7 @@ using System.Linq;
 using System.Reflection;
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(SR1SlimesStandalone.ModEntry), "SR1 Slimes Standalone", "0.3.0", "Hei Games Studio")]
+[assembly: MelonInfo(typeof(SR1SlimesStandalone.ModEntry), "SR1 Slimes Standalone", "0.4.0", "Hei Games Studio")]
 [assembly: MelonGame("MonomiPark", "SlimeRancher2")]
 
 namespace SR1SlimesStandalone
@@ -51,6 +51,7 @@ namespace SR1SlimesStandalone
         private object _pinkDef;
         private int _tick;
         private bool _ready;
+        private bool _pediaReady;
         private string _status = "SR1 Slimes carregando...";
         private DateTime _statusUntil = DateTime.UtcNow.AddSeconds(12);
 
@@ -60,9 +61,9 @@ namespace SR1SlimesStandalone
 
         public override void OnInitializeMelon()
         {
-            LoggerInstance.Msg("SR1 Slimes Standalone v0.3 iniciado. Sem Custom Slime Creator.");
+            LoggerInstance.Msg("SR1 Slimes Standalone v0.4 iniciado. Sem Custom Slime Creator.");
             LoggerInstance.Msg("Hotkeys: 8 = Rad, 9 = Quantum, 0 = Mosaic.");
-            _status = "SR1 Slimes: entre em um save.  8 Rad | 9 Quantum | 0 Mosaic";
+            _status = "SR1 Slimes v0.4: criando 3 slimes locais... 8 Rad | 9 Quantum | 0 Mosaic";
             _statusUntil = DateTime.UtcNow.AddSeconds(15);
         }
 
@@ -71,14 +72,24 @@ namespace SR1SlimesStandalone
             try
             {
                 _tick++;
-                if (!_ready && _tick % 90 == 0)
+
+                if (!_ready && _tick % 30 == 0)
                 {
                     if (EnsureReady())
                     {
                         _ready = true;
-                        _status = "SR1 Slimes ATIVOS — 8 Rad | 9 Quantum | 0 Mosaic — Slimepedia adicionada";
-                        _statusUntil = DateTime.UtcNow.AddSeconds(12);
-                        LoggerInstance.Msg("Rad, Quantum e Mosaic registrados. Slimepedia instalada.");
+                        Show("SR1 Slimes ATIVOS — 8 Rad | 9 Quantum | 0 Mosaic", 10);
+                        LoggerInstance.Msg("Rad, Quantum e Mosaic foram criados localmente e registrados.");
+                    }
+                }
+
+                if (_ready && !_pediaReady && _tick % 60 == 0)
+                {
+                    _pediaReady = TryInstallAllPedia();
+                    if (_pediaReady)
+                    {
+                        Show("Slimepedia: Rad, Quantum e Mosaic adicionados!", 8);
+                        LoggerInstance.Msg("Entradas da Slimepedia instaladas.");
                     }
                 }
 
@@ -111,33 +122,71 @@ namespace SR1SlimesStandalone
                 var slimeDefType = FindType("Il2Cpp.SlimeDefinition") ?? FindTypeBySimpleName("SlimeDefinition");
                 if (slimeDefType == null) return false;
 
-                var allDefs = FindAllResources(slimeDefType).ToList();
-                if (allDefs.Count < 30) return false;
+                var allDefs = DiscoverSlimeDefinitions(slimeDefType);
+                if (allDefs.Count == 0) return false;
 
                 _pinkDef = FindPink(allDefs);
                 if (_pinkDef == null) return false;
 
-                foreach (var s in _specs)
+                foreach (var sp in _specs)
                 {
-                    if (!_defs.ContainsKey(s.Key))
-                    {
-                        var def = BuildDefinition(s);
-                        if (def == null) return false;
-                        _defs[s.Key] = def;
-                    }
+                    if (_defs.ContainsKey(sp.Key)) continue;
+                    var def = BuildDefinition(sp);
+                    if (def == null) return false;
+                    _defs[sp.Key] = def;
                 }
 
-                bool pediaOk = true;
-                foreach (var s in _specs)
-                    pediaOk &= EnsurePedia(s, _defs[s.Key]);
-
-                return pediaOk;
+                return _defs.Count == _specs.Length;
             }
             catch (Exception ex)
             {
-                LoggerInstance.Warning("Ainda aguardando o mundo carregar: " + ex.Message);
+                LoggerInstance.Warning("Preparando slimes locais: " + ex.Message);
                 return false;
             }
+        }
+
+        private List<object> DiscoverSlimeDefinitions(Type slimeDefType)
+        {
+            var result = FindAllResources(slimeDefType).ToList();
+
+            try
+            {
+                var gc = GetGameContext();
+                var defs = gc == null ? null : GetMember(gc, "SlimeDefinitions");
+                var slimes = defs == null ? null : GetMember(defs, "Slimes");
+                if (slimes is IEnumerable en)
+                {
+                    foreach (var d in en)
+                        if (d != null && !result.Any(x => ReferenceEquals(x,d) || x.Equals(d)))
+                            result.Add(d);
+                }
+
+                var map = defs == null ? null : GetMember(defs, "_slimeDefinitionsByIdentifiable");
+                if (map is IEnumerable men)
+                {
+                    foreach (var pair in men)
+                    {
+                        var value = GetMember(pair, "Value", "value");
+                        if (value != null && !result.Any(x => ReferenceEquals(x,value) || x.Equals(value)))
+                            result.Add(value);
+                    }
+                }
+            }
+            catch { }
+
+            return result;
+        }
+
+        private bool TryInstallAllPedia()
+        {
+            if (!_ready) return false;
+            bool ok = true;
+            foreach (var sp in _specs)
+            {
+                if (!_defs.TryGetValue(sp.Key, out var def) || def == null) { ok = false; continue; }
+                ok &= EnsurePedia(sp, def);
+            }
+            return ok;
         }
 
         private object FindPink(List<object> defs)
@@ -203,9 +252,20 @@ namespace SR1SlimesStandalone
             try { var _ = GetMember(def, "StableHashedId"); } catch { }
         }
 
+        private object GetGameContext()
+        {
+            var t = FindType("Il2CppMonomiPark.SlimeRancher.GameContext") ?? FindTypeBySimpleName("GameContext");
+            if (t == null) return null;
+
+            var inst = GetStaticMember(t, "Instance");
+            if (inst != null) return inst;
+
+            return FindFirstResource(t);
+        }
+
         private void RegisterSlime(object def)
         {
-            var gc = FindFirstResource(FindType("Il2CppMonomiPark.SlimeRancher.GameContext") ?? FindTypeBySimpleName("GameContext"));
+            var gc = GetGameContext();
             if (gc == null) return;
 
             var refId = GetString(def, "ReferenceId", "referenceId");
@@ -401,10 +461,14 @@ namespace SR1SlimesStandalone
         {
             try
             {
-                if (!_ready && !EnsureReady())
+                if (!_ready)
                 {
-                    Show("Ainda carregando. Entre no mundo primeiro.", 3);
-                    return;
+                    _ready = EnsureReady();
+                    if (!_ready)
+                    {
+                        Show("Ainda preparando os slimes locais. Tente de novo em 1 segundo.", 3);
+                        return;
+                    }
                 }
 
                 var s = _specs.First(x => x.Key.Equals(key,StringComparison.OrdinalIgnoreCase));
@@ -442,6 +506,7 @@ namespace SR1SlimesStandalone
                     if (e != null) TryCall(e,"CalculateAllEats");
                 }
 
+                if (!_pediaReady) _pediaReady = TryInstallAllPedia();
                 Show(s.Display + " spawnado!   8 Rad | 9 Quantum | 0 Mosaic", 3);
                 LoggerInstance.Msg(s.Display + " spawnado.");
             }
@@ -873,12 +938,20 @@ namespace SR1SlimesStandalone
         private static object GetComponent(object go,Type componentType)
         {
             if(go==null||componentType==null)return null;
+
+            foreach(var m in go.GetType().GetMethods(BindingFlags.Public|BindingFlags.Instance))
+            {
+                if(m.Name!="GetComponent" || !m.IsGenericMethodDefinition) continue;
+                if(m.GetGenericArguments().Length!=1 || m.GetParameters().Length!=0) continue;
+                try { return m.MakeGenericMethod(componentType).Invoke(go,null); } catch { }
+            }
+
             foreach(var m in go.GetType().GetMethods(BindingFlags.Public|BindingFlags.Instance))
             {
                 if(m.Name!="GetComponent"||m.IsGenericMethod)continue;
                 var p=m.GetParameters();
-                if(p.Length==1&&p[0].ParameterType==typeof(Type))
-                { try{return m.Invoke(go,new object[]{componentType});}catch{} }
+                if(p.Length!=1)continue;
+                try{return m.Invoke(go,new[]{ConvertArg(componentType,p[0].ParameterType)});}catch{}
             }
             return null;
         }
@@ -904,10 +977,17 @@ namespace SR1SlimesStandalone
             {
                 if(m.Name!="GetComponentsInChildren"||!m.IsGenericMethodDefinition)continue;
                 var p=m.GetParameters();
-                if(p.Length==1&&p[0].ParameterType==typeof(bool))
+                object arr=null;
+                try
                 {
-                    object arr=null;try{arr=m.MakeGenericMethod(componentType).Invoke(go,new object[]{true});}catch{}
-                    if(arr is IEnumerable en)foreach(var x in en)if(x!=null)yield return x;
+                    var gm=m.MakeGenericMethod(componentType);
+                    if(p.Length==1&&p[0].ParameterType==typeof(bool)) arr=gm.Invoke(go,new object[]{true});
+                    else if(p.Length==0) arr=gm.Invoke(go,null);
+                }
+                catch{}
+                if(arr is IEnumerable en)
+                {
+                    foreach(var x in en)if(x!=null)yield return x;
                     yield break;
                 }
             }
@@ -915,19 +995,41 @@ namespace SR1SlimesStandalone
 
         private static IEnumerable<object> FindAllResources(Type type)
         {
-            if(type==null)yield break;
+            if(type==null) yield break;
             var r=FindType("UnityEngine.Resources");
-            if(r==null)yield break;
+            if(r==null) yield break;
+
+            // Unity's IL2CPP wrappers expose the generic API reliably.
             foreach(var m in r.GetMethods(BindingFlags.Public|BindingFlags.Static))
             {
-                if(m.Name!="FindObjectsOfTypeAll"||m.IsGenericMethod)continue;
-                var p=m.GetParameters();
-                if(p.Length==1&&p[0].ParameterType==typeof(Type))
+                if(m.Name!="FindObjectsOfTypeAll" || !m.IsGenericMethodDefinition) continue;
+                if(m.GetGenericArguments().Length!=1 || m.GetParameters().Length!=0) continue;
+                object arr=null;
+                try { arr=m.MakeGenericMethod(type).Invoke(null,null); } catch { }
+                if(arr is IEnumerable en)
                 {
-                    object arr=null;try{arr=m.Invoke(null,new object[]{type});}catch{}
-                    if(arr is IEnumerable en)foreach(var x in en)if(x!=null)yield return x;
+                    foreach(var x in en) if(x!=null) yield return x;
                     yield break;
                 }
+            }
+
+            // Fallback for any non-generic overload exposed by the wrapper.
+            foreach(var m in r.GetMethods(BindingFlags.Public|BindingFlags.Static))
+            {
+                if(m.Name!="FindObjectsOfTypeAll" || m.IsGenericMethod) continue;
+                var p=m.GetParameters();
+                if(p.Length!=1) continue;
+                try
+                {
+                    var arg=ConvertArg(type,p[0].ParameterType);
+                    var arr=m.Invoke(null,new[]{arg});
+                    if(arr is IEnumerable en)
+                    {
+                        foreach(var x in en) if(x!=null) yield return x;
+                        yield break;
+                    }
+                }
+                catch { }
             }
         }
 
