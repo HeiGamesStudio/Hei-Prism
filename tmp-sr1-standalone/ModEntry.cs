@@ -1019,17 +1019,20 @@ namespace SR1SlimesStandalone
                 if(m.Name!="FindObjectsOfTypeAll" || m.IsGenericMethod) continue;
                 var p=m.GetParameters();
                 if(p.Length!=1) continue;
+
+                object arr=null;
                 try
                 {
                     var arg=ConvertArg(type,p[0].ParameterType);
-                    var arr=m.Invoke(null,new[]{arg});
-                    if(arr is IEnumerable en)
-                    {
-                        foreach(var x in en) if(x!=null) yield return x;
-                        yield break;
-                    }
+                    arr=m.Invoke(null,new[]{arg});
                 }
                 catch { }
+
+                if(arr is IEnumerable en)
+                {
+                    foreach(var x in en) if(x!=null) yield return x;
+                    yield break;
+                }
             }
         }
 
