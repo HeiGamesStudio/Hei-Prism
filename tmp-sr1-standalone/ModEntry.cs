@@ -1498,8 +1498,30 @@ namespace SR1SlimesStandalone
             try
             {
                 var m=dict.GetType().GetMethods().FirstOrDefault(x=>x.Name=="ContainsKey"&&x.GetParameters().Length==1);
-                return m!=null&&(bool)m.Invoke(dict,new[]{key});
+                if(m==null)return false;
+                var p=m.GetParameters();
+                return (bool)m.Invoke(dict,new[]{ConvertArg(key,p[0].ParameterType)});
             }catch{return false;}
+        }
+
+        private static bool DictSet(object dict,object key,object value)
+        {
+            if(dict==null)return false;
+            try
+            {
+                var item=dict.GetType().GetProperty("Item",BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                if(item!=null&&item.CanWrite)
+                {
+                    var idx=item.GetIndexParameters();
+                    object k=idx.Length>0?ConvertArg(key,idx[0].ParameterType):key;
+                    object v=ConvertArg(value,item.PropertyType);
+                    bool existed=DictContains(dict,key);
+                    item.SetValue(dict,v,new[]{k});
+                    return !existed;
+                }
+            }catch{}
+            if(!DictContains(dict,key)){DictAdd(dict,key,value);return true;}
+            return false;
         }
 
         private static void DictAddIfMissing(object dict,object key,object value)
