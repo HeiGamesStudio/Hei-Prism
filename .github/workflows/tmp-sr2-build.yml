@@ -1,0 +1,27 @@
+name: Build temporary SR2 spawner DLL
+
+on:
+  push:
+    branches:
+      - tmp-sr2-dll-build-20260926
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+      - name: Restore
+        run: dotnet restore tmp-sr2-build/SR1SlimesSpawner.csproj
+      - name: Build
+        run: dotnet build tmp-sr2-build/SR1SlimesSpawner.csproj -c Release --no-restore
+      - name: Collect DLL
+        run: |
+          mkdir -p artifact
+          cp tmp-sr2-build/bin/Release/net6.0/SR1SlimesSpawner.dll artifact/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SR1SlimesSpawner
+          path: artifact/SR1SlimesSpawner.dll
