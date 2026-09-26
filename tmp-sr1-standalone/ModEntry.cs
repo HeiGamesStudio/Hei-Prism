@@ -1,0 +1,1092 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using MelonLoader;
+
+[assembly: MelonInfo(typeof(SR1SlimesStandalone.ModEntry), "SR1 Slimes Standalone", "0.3.0", "Hei Games Studio")]
+[assembly: MelonGame("MonomiPark", "SlimeRancher2")]
+
+namespace SR1SlimesStandalone
+{
+    public sealed class ModEntry : MelonMod
+    {
+        private sealed class Spec
+        {
+            public string Key;
+            public string Display;
+            public string RefId;
+            public string[] ShaderNames;
+            public float[] Top, Mid, Bottom;
+            public string Description;
+        }
+
+        private readonly Spec[] _specs = new[]
+        {
+            new Spec {
+                Key="Rad", Display="Rad Slime", RefId="SlimeDefinition.SR1Rad",
+                ShaderNames=new[]{"SR/AMP/Slime/Body/Rad","SlimeBody_rad","SR/AMP/Slime/Body/Rad/Normal"},
+                Top=new[]{0.48f,0.95f,0.48f,1f}, Mid=new[]{0.25f,0.68f,0.29f,1f}, Bottom=new[]{0.16f,0.48f,0.20f,1f},
+                Description="SLIMEOLOGIA — O Slime Rad emite uma aura de radiação intensa e brilha com um tom verde característico. No Slime Rancher original, sua comida favorita é Oca Oca.\n\nRISCOS PARA O RANCHEIRO — Ficar dentro de sua aura por muito tempo aumenta a exposição à radiação e pode causar dano. O melhor é manter distância quando o medidor de exposição sobe.\n\nPLORTONOMIA — Plorts Rad são valorizados como fontes compactas de energia e aparecem em tecnologias que exigem grande potência."
+            },
+            new Spec {
+                Key="Quantum", Display="Quantum Slime", RefId="SlimeDefinition.SR1Quantum",
+                ShaderNames=new[]{"SR/AMP/Slime/Body/Quantum","SlimeBody_quantum","SR/AMP/Slime/Body/QuantumTimeOverride"},
+                Top=new[]{1f,0.84f,0.24f,1f}, Mid=new[]{1f,0.61f,0.06f,1f}, Bottom=new[]{0.88f,0.39f,0.03f,1f},
+                Description="SLIMEOLOGIA — O Slime Quantum está ligado às misteriosas Ruínas Antigas. Ele produz projeções fantasmagóricas de possíveis posições e pode trocar de lugar com uma delas, parecendo se teleportar. Sua comida favorita no primeiro jogo é Phase Lemon.\n\nRISCOS PARA O RANCHEIRO — Quando fica muito agitado, suas projeções se tornam um ótimo caminho de fuga. Manter o slime bem alimentado e controlar sua agitação ajuda a evitar escapadas.\n\nPLORTONOMIA — Plorts Quantum despertam interesse por suas propriedades ligadas a estados e realidades alternativas."
+            },
+            new Spec {
+                Key="Mosaic", Display="Mosaic Slime", RefId="SlimeDefinition.SR1Mosaic",
+                ShaderNames=new[]{"SR/AMP/Slime/Mosaic","MosaicSlime","SR/AMP/Slime/Body/Mosaic"},
+                Top=new[]{0.94f,0.98f,1f,1f}, Mid=new[]{0.57f,0.83f,1f,1f}, Bottom=new[]{0.65f,0.48f,0.96f,1f},
+                Description="SLIMEOLOGIA — O Slime Mosaic é coberto por placas brilhantes semelhantes a vidro, capazes de refletir a luz em cores intensas. Sua comida favorita no Slime Rancher original é Silver Parsnip.\n\nRISCOS PARA O RANCHEIRO — Seus glints podem cair no chão e explodir em chamas. Água é uma ferramenta importante para apagar esses focos antes que virem um problema.\n\nPLORTONOMIA — Plorts Mosaic são procurados por suas propriedades ópticas e pela semelhança com o misterioso vidro encontrado pela Grande, Grande Extensão."
+            }
+        };
+
+        private readonly Dictionary<string, object> _defs = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, object> _prefabs = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, object> _pedia = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
+        private object _pinkDef;
+        private int _tick;
+        private bool _ready;
+        private string _status = "SR1 Slimes carregando...";
+        private DateTime _statusUntil = DateTime.UtcNow.AddSeconds(12);
+
+        private Type _guiType, _rectType;
+        private ConstructorInfo _rectCtor;
+        private MethodInfo _guiBox, _guiLabel;
+
+        public override void OnInitializeMelon()
+        {
+            LoggerInstance.Msg("SR1 Slimes Standalone v0.3 iniciado. Sem Custom Slime Creator.");
+            LoggerInstance.Msg("Hotkeys: 8 = Rad, 9 = Quantum, 0 = Mosaic.");
+            _status = "SR1 Slimes: entre em um save.  8 Rad | 9 Quantum | 0 Mosaic";
+            _statusUntil = DateTime.UtcNow.AddSeconds(15);
+        }
+
+        public override void OnUpdate()
+        {
+            try
+            {
+                _tick++;
+                if (!_ready && _tick % 90 == 0)
+                {
+                    if (EnsureReady())
+                    {
+                        _ready = true;
+                        _status = "SR1 Slimes ATIVOS — 8 Rad | 9 Quantum | 0 Mosaic — Slimepedia adicionada";
+                        _statusUntil = DateTime.UtcNow.AddSeconds(12);
+                        LoggerInstance.Msg("Rad, Quantum e Mosaic registrados. Slimepedia instalada.");
+                    }
+                }
+
+                if (KeyPressed("digit8Key","numpad8Key","Alpha8","Keypad8")) Spawn("Rad");
+                if (KeyPressed("digit9Key","numpad9Key","Alpha9","Keypad9")) Spawn("Quantum");
+                if (KeyPressed("digit0Key","numpad0Key","Alpha0","Keypad0")) Spawn("Mosaic");
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.Warning("Update: " + ex.Message);
+            }
+        }
+
+        public override void OnGUI()
+        {
+            try
+            {
+                if (DateTime.UtcNow > _statusUntil) return;
+                if (!EnsureGui()) return;
+                _guiBox?.Invoke(null, new[] { Rect(18f,18f,520f,54f), "" });
+                _guiLabel?.Invoke(null, new[] { Rect(31f,32f,495f,28f), _status });
+            }
+            catch { }
+        }
+
+        private bool EnsureReady()
+        {
+            try
+            {
+                var slimeDefType = FindType("Il2Cpp.SlimeDefinition") ?? FindTypeBySimpleName("SlimeDefinition");
+                if (slimeDefType == null) return false;
+
+                var allDefs = FindAllResources(slimeDefType).ToList();
+                if (allDefs.Count < 30) return false;
+
+                _pinkDef = FindPink(allDefs);
+                if (_pinkDef == null) return false;
+
+                foreach (var s in _specs)
+                {
+                    if (!_defs.ContainsKey(s.Key))
+                    {
+                        var def = BuildDefinition(s);
+                        if (def == null) return false;
+                        _defs[s.Key] = def;
+                    }
+                }
+
+                bool pediaOk = true;
+                foreach (var s in _specs)
+                    pediaOk &= EnsurePedia(s, _defs[s.Key]);
+
+                return pediaOk;
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.Warning("Ainda aguardando o mundo carregar: " + ex.Message);
+                return false;
+            }
+        }
+
+        private object FindPink(List<object> defs)
+        {
+            foreach (var d in defs)
+            {
+                var rid = GetString(d, "ReferenceId", "referenceId");
+                var n = GetString(d, "name", "Name");
+                if (string.Equals(rid, "SlimeDefinition.Pink", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(n, "Pink", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(n, "PinkSlime", StringComparison.OrdinalIgnoreCase))
+                    return d;
+            }
+            foreach (var d in defs)
+            {
+                var rid = GetString(d, "ReferenceId", "referenceId") ?? "";
+                if (rid.IndexOf("Pink", StringComparison.OrdinalIgnoreCase) >= 0) return d;
+            }
+            return null;
+        }
+
+        private object BuildDefinition(Spec s)
+        {
+            try
+            {
+                var def = InstantiateObject(_pinkDef);
+                if (def == null) return null;
+
+                SetMember(def, "name", "SR1" + s.Key + "Slime");
+                ForceReferenceId(def, s.RefId);
+
+                var ln = MakeLocalized("Actor", "sr1slimes.name." + s.Key.ToLowerInvariant(), s.Display);
+                if (ln != null) SetMember(def, "localizedName", ln);
+
+                var basePrefab = GetMember(_pinkDef, "prefab", "Prefab");
+                if (basePrefab == null) return null;
+                var prefab = InstantiateObject(basePrefab);
+                if (prefab == null) return null;
+
+                TryCall(prefab, "SetActive", false);
+                SetMember(prefab, "name", "SR1" + s.Key + "SlimePrefab");
+                WirePrefab(prefab, def);
+                SetMember(def, "prefab", prefab);
+
+                RegisterSlime(def);
+                _prefabs[s.Key] = prefab;
+
+                LoggerInstance.Msg("Criado " + s.Display + " standalone.");
+                return def;
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.Error("Build " + s.Key + ": " + ex);
+                return null;
+            }
+        }
+
+        private void ForceReferenceId(object def, string refId)
+        {
+            SetMember(def, "referenceId", refId);
+            SetMember(def, "initializedHashId", false);
+            SetMember(def, "stableHashedId", 0);
+            try { var _ = GetMember(def, "StableHashedId"); } catch { }
+        }
+
+        private void RegisterSlime(object def)
+        {
+            var gc = FindFirstResource(FindType("Il2CppMonomiPark.SlimeRancher.GameContext") ?? FindTypeBySimpleName("GameContext"));
+            if (gc == null) return;
+
+            var refId = GetString(def, "ReferenceId", "referenceId");
+            var lookup = GetMember(gc, "LookupDirector");
+            var defs = GetMember(gc, "SlimeDefinitions");
+            var asd = GetMember(gc, "AutoSaveDirector");
+
+            if (defs != null)
+            {
+                var map = GetMember(defs, "_slimeDefinitionsByIdentifiable");
+                DictAddIfMissing(map, def, def);
+                AppendMemberCollection(defs, "Slimes", def);
+            }
+
+            if (lookup != null)
+            {
+                var map = GetMember(lookup, "_identifiableTypeByRefId");
+                if (!string.IsNullOrEmpty(refId)) DictAddIfMissing(map, refId, def);
+            }
+
+            if (lookup != null && asd != null)
+            {
+                var cfg = GetMember(asd, "_configuration");
+                var allGroup = GetMember(cfg, "_identifiableTypes");
+                if (allGroup != null) InvokeBest(lookup, "AddIdentifiableTypeToGroup", def, allGroup);
+
+                var trans = GetMember(asd, "_saveReferenceTranslation");
+                if (trans != null && !string.IsNullOrEmpty(refId))
+                {
+                    DictAddIfMissing(GetMember(trans, "_identifiableTypeLookup"), refId, def);
+                    var pid = GetMember(trans, "_identifiableTypeToPersistenceId");
+                    if (pid != null)
+                    {
+                        AppendMemberCollection(pid, "_primaryIndex", refId);
+                        var rev = GetMember(pid, "_reverseIndex");
+                        if (!DictContains(rev, refId))
+                            DictAdd(rev, refId, DictCount(rev));
+                    }
+                }
+            }
+
+            if (lookup != null)
+            {
+                var groupType = FindType("Il2Cpp.IdentifiableTypeGroup") ?? FindTypeBySimpleName("IdentifiableTypeGroup");
+                if (groupType != null)
+                {
+                    var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
+                        "VaccableBaseSlimeGroup","BaseSlimeGroup","SlimesGroup","SmallSlimeGroup",
+                        "EdibleSlimeGroup","IdentifiableTypesGroup","SlimesSinkInShallowWaterGroup"
+                    };
+                    foreach (var g in FindAllResources(groupType))
+                    {
+                        var n = GetString(g, "name", "Name");
+                        if (n != null && wanted.Contains(n))
+                            InvokeBest(lookup, "AddIdentifiableTypeToGroup", def, g);
+                    }
+                }
+            }
+        }
+
+        private void WirePrefab(object go, object def)
+        {
+            if (go == null || def == null) return;
+            var appType = FindTypeBySimpleName("SlimeAppearanceApplicator");
+            var identType = FindTypeBySimpleName("IdentifiableActor");
+            var eatType = FindTypeBySimpleName("SlimeEat");
+
+            if (appType != null)
+            {
+                var c = GetComponent(go, appType);
+                if (c != null)
+                {
+                    SetMember(c, "SlimeDefinition", def);
+                    var apps = GetMember(def, "AppearancesDefault");
+                    var first = FirstOf(apps);
+                    if (first != null) SetMember(c, "Appearance", first);
+                }
+            }
+            if (identType != null)
+            {
+                var c = GetComponent(go, identType);
+                if (c != null) SetMember(c, "identType", def);
+            }
+            if (eatType != null)
+            {
+                var c = GetComponent(go, eatType);
+                if (c != null) SetMember(c, "SlimeDefinition", def);
+            }
+        }
+
+        private bool EnsurePedia(Spec s, object def)
+        {
+            try
+            {
+                if (_pedia.ContainsKey(s.Key)) return true;
+
+                var entryType = FindType("Il2CppMonomiPark.SlimeRancher.Pedia.IdentifiablePediaEntry") ?? FindTypeBySimpleName("IdentifiablePediaEntry");
+                var catType = FindType("Il2CppMonomiPark.SlimeRancher.Pedia.PediaCategory") ?? FindTypeBySimpleName("PediaCategory");
+                if (entryType == null || catType == null) return false;
+
+                object pinkEntry = null;
+                foreach (var e in FindAllResources(entryType))
+                {
+                    var ident = GetMember(e, "_identifiableType", "IdentifiableType");
+                    var ename = GetString(e, "name", "Name");
+                    if (ident != null && _pinkDef != null && (ReferenceEquals(ident,_pinkDef) || ident.Equals(_pinkDef))) { pinkEntry=e; break; }
+                    if (pinkEntry == null && string.Equals(ename,"Pink",StringComparison.OrdinalIgnoreCase)) pinkEntry=e;
+                }
+                if (pinkEntry == null) return false;
+
+                object entry = null;
+                var wantedName = "SR1" + s.Key + "Pedia";
+                foreach (var e in FindAllResources(entryType))
+                {
+                    if (string.Equals(GetString(e,"name","Name"), wantedName, StringComparison.OrdinalIgnoreCase))
+                    { entry=e; break; }
+                }
+
+                if (entry == null)
+                {
+                    entry = InstantiateObject(pinkEntry);
+                    if (entry == null) return false;
+                    SetMember(entry, "name", wantedName);
+                    SetMember(entry, "_identifiableType", def);
+                    var title = GetMember(def, "localizedName");
+                    if (title != null) SetMember(entry, "_title", title);
+                    var desc = MakeLocalized("Actor", "sr1slimes.pedia." + s.Key.ToLowerInvariant(), s.Description);
+                    if (desc != null) SetMember(entry, "_description", desc);
+                    SetMember(entry, "_isUnlockedInitially", true);
+                    ClearMemberCollection(entry, "_details");
+                }
+
+                object slimesCategory = null;
+                foreach (var c in FindAllResources(catType))
+                {
+                    if (string.Equals(GetString(c,"name","Name"),"Slimes",StringComparison.OrdinalIgnoreCase))
+                    { slimesCategory=c; break; }
+                }
+                if (slimesCategory == null) return false;
+
+                AppendMemberCollection(slimesCategory, "_items", entry);
+
+                var runtime = InvokeBest(slimesCategory, "GetRuntimeCategory");
+                if (runtime != null)
+                    AddToLiveCollection(GetMember(runtime, "_items", "Items"), entry);
+
+                var gc = FindFirstResource(FindType("Il2CppMonomiPark.SlimeRancher.GameContext") ?? FindTypeBySimpleName("GameContext"));
+                var lookup = gc == null ? null : GetMember(gc, "LookupDirector");
+                if (lookup != null)
+                    InvokeBest(lookup, "AddPediaEntryToCategory", entry, slimesCategory);
+
+                UnlockPedia(entry, def);
+
+                _pedia[s.Key] = entry;
+                LoggerInstance.Msg(s.Display + " adicionado a Slimepedia.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.Warning("Pedia " + s.Key + ": " + ex.Message);
+                return false;
+            }
+        }
+
+        private void UnlockPedia(object entry, object def)
+        {
+            try
+            {
+                var sceneType = FindType("Il2CppMonomiPark.SlimeRancher.SceneContext") ?? FindTypeBySimpleName("SceneContext");
+                if (sceneType == null) return;
+                var scene = GetMember(sceneType, null, "Instance");
+                if (scene == null) return;
+                var dir = GetMember(scene, "PediaDirector");
+                if (dir == null) return;
+
+                foreach (var m in dir.GetType().GetMethods(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance))
+                {
+                    if (m.Name != "Unlock") continue;
+                    var p=m.GetParameters();
+                    if (p.Length != 2 || p[1].ParameterType != typeof(bool)) continue;
+                    try
+                    {
+                        if (entry != null && p[0].ParameterType.IsInstanceOfType(entry)) { m.Invoke(dir,new[]{entry,(object)false}); return; }
+                        if (def != null && p[0].ParameterType.IsInstanceOfType(def)) { m.Invoke(dir,new[]{def,(object)false}); return; }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        }
+
+        private void Spawn(string key)
+        {
+            try
+            {
+                if (!_ready && !EnsureReady())
+                {
+                    Show("Ainda carregando. Entre no mundo primeiro.", 3);
+                    return;
+                }
+
+                var s = _specs.First(x => x.Key.Equals(key,StringComparison.OrdinalIgnoreCase));
+                var def = _defs[key];
+                var prefab = _prefabs[key];
+
+                object pos, rot;
+                GetSpawnTransform(out pos, out rot);
+
+                object go = TryActorSpawn(def, pos, rot);
+                if (go == null) go = InstantiateAt(prefab, pos, rot);
+                if (go == null)
+                {
+                    Show("Falha ao spawnar " + s.Display, 4);
+                    return;
+                }
+
+                TryCall(go, "SetActive", true);
+                SetMember(go, "name", s.Display + " [SR1 Standalone]");
+                WirePrefab(go, def);
+
+                var appType = FindTypeBySimpleName("SlimeAppearanceApplicator");
+                if (appType != null)
+                {
+                    var a = GetComponent(go, appType);
+                    if (a != null) TryCall(a, "ApplyAppearance");
+                }
+
+                Recolor(go, s);
+
+                var eatType = FindTypeBySimpleName("SlimeEat");
+                if (eatType != null)
+                {
+                    var e = GetComponent(go,eatType);
+                    if (e != null) TryCall(e,"CalculateAllEats");
+                }
+
+                Show(s.Display + " spawnado!   8 Rad | 9 Quantum | 0 Mosaic", 3);
+                LoggerInstance.Msg(s.Display + " spawnado.");
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.Error("Spawn " + key + ": " + ex);
+                Show("Erro no spawn: " + ex.Message, 5);
+            }
+        }
+
+        private object TryActorSpawn(object def, object pos, object rot)
+        {
+            try
+            {
+                var sceneType = FindType("Il2CppMonomiPark.SlimeRancher.SceneContext") ?? FindTypeBySimpleName("SceneContext");
+                var scene = sceneType == null ? null : GetMember(sceneType, null, "Instance");
+                if (scene == null) return null;
+                var modelSvc = GetMember(scene, "GameModel");
+                var registry = GetMember(scene, "RegionRegistry");
+                var group = registry == null ? null : GetMember(registry, "CurrentSceneGroup");
+                if (modelSvc == null || group == null) return null;
+
+                object model = null;
+                foreach (var m in modelSvc.GetType().GetMethods(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance))
+                {
+                    if (m.Name != "InstantiateActorModel") continue;
+                    var p=m.GetParameters();
+                    if (p.Length != 5) continue;
+                    try { model=m.Invoke(modelSvc,new[]{def,group,pos,rot,(object)false}); if(model!=null) break; } catch { }
+                }
+                if (model == null) return null;
+
+                var helpers = FindTypeBySimpleName("InstantiationHelpers");
+                if (helpers == null) return null;
+                foreach (var m in helpers.GetMethods(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static))
+                {
+                    if (m.Name != "InstantiateActorFromModel") continue;
+                    var p=m.GetParameters();
+                    if (p.Length != 1) continue;
+                    try { return m.Invoke(null,new[]{model}); } catch { }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private void GetSpawnTransform(out object pos, out object rot)
+        {
+            var v3 = FindType("UnityEngine.Vector3");
+            var quat = FindType("UnityEngine.Quaternion");
+            pos = Activator.CreateInstance(v3, new object[]{0f,5f,0f});
+            rot = GetMember(quat, null, "identity");
+
+            try
+            {
+                var camType=FindType("UnityEngine.Camera");
+                var cam=GetMember(camType,null,"main");
+                if(cam==null) return;
+                var tr=GetMember(cam,"transform");
+                var p=GetMember(tr,"position");
+                var f=GetMember(tr,"forward");
+                float px=Num(GetMember(p,"x")), py=Num(GetMember(p,"y")), pz=Num(GetMember(p,"z"));
+                float fx=Num(GetMember(f,"x")), fy=Num(GetMember(f,"y")), fz=Num(GetMember(f,"z"));
+                pos=Activator.CreateInstance(v3,new object[]{px+fx*3f,py+fy*3f+0.5f,pz+fz*3f});
+            }
+            catch { }
+        }
+
+        private void Recolor(object go, Spec s)
+        {
+            var rendererType = FindType("UnityEngine.Renderer");
+            var materialType = FindType("UnityEngine.Material");
+            var shaderType = FindType("UnityEngine.Shader");
+            var colorType = FindType("UnityEngine.Color");
+            if (rendererType == null || materialType == null || colorType == null) return;
+
+            object shader = null;
+            if (shaderType != null)
+            {
+                var find=shaderType.GetMethods(BindingFlags.Public|BindingFlags.Static).FirstOrDefault(m=>m.Name=="Find"&&m.GetParameters().Length==1);
+                if(find!=null)
+                    foreach(var n in s.ShaderNames)
+                    {
+                        try { shader=find.Invoke(null,new object[]{n}); if(shader!=null) break; } catch { }
+                    }
+            }
+
+            var top=MakeColor(colorType,s.Top), mid=MakeColor(colorType,s.Mid), bottom=MakeColor(colorType,s.Bottom);
+            var white=MakeColor(colorType,new[]{1f,1f,1f,1f});
+
+            foreach(var r in GetComponentsInChildren(go,rendererType))
+            {
+                var mats=GetMember(r,"materials","Materials") as IEnumerable;
+                if(mats==null) continue;
+                foreach(var m in mats)
+                {
+                    if(m==null) continue;
+                    bool body=HasMatProp(m,"_TopColor")||HasMatProp(m,"_MiddleColor")||HasMatProp(m,"_BottomColor");
+                    if(!body) continue;
+                    if(shader!=null) SetMember(m,"shader",shader);
+                    SetMatColor(m,"_TopColor",top);
+                    SetMatColor(m,"_MiddleColor",mid);
+                    SetMatColor(m,"_BottomColor",bottom);
+                    SetMatColor(m,"_SpecColor",white);
+                    SetMatColor(m,"_Color",mid);
+                    SetMatColor(m,"_BaseColor",mid);
+                }
+            }
+        }
+
+        private static object MakeColor(Type colorType,float[] c)
+            => Activator.CreateInstance(colorType,new object[]{c[0],c[1],c[2],c[3]});
+
+        private static bool HasMatProp(object mat,string p)
+        {
+            try { var m=mat.GetType().GetMethod("HasProperty",new[]{typeof(string)}); return m!=null && (bool)m.Invoke(mat,new object[]{p}); } catch { return false; }
+        }
+
+        private static void SetMatColor(object mat,string p,object color)
+        {
+            try
+            {
+                if(!HasMatProp(mat,p)) return;
+                var m=mat.GetType().GetMethods().FirstOrDefault(x=>x.Name=="SetColor"&&x.GetParameters().Length==2&&x.GetParameters()[0].ParameterType==typeof(string));
+                m?.Invoke(mat,new[]{(object)p,color});
+            }
+            catch { }
+        }
+
+        private object MakeLocalized(string tableName, string key, string text)
+        {
+            try
+            {
+                var settings=FindType("UnityEngine.Localization.Settings.LocalizationSettings");
+                if(settings==null) return null;
+                var db=GetMember(settings,null,"StringDatabase");
+                if(db==null) return null;
+
+                object table=null;
+                foreach(var m in db.GetType().GetMethods(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance))
+                {
+                    if(m.Name!="GetTable") continue;
+                    var p=m.GetParameters();
+                    if(p.Length<1) continue;
+                    try
+                    {
+                        var args=new object[p.Length];
+                        args[0]=ConvertArg(tableName,p[0].ParameterType);
+                        for(int i=1;i<p.Length;i++) args[i]=p[i].HasDefaultValue?p[i].DefaultValue:null;
+                        table=m.Invoke(db,args);
+                        if(table!=null) break;
+                    }
+                    catch { }
+                }
+                if(table==null) return null;
+
+                object entry=null;
+                foreach(var m in table.GetType().GetMethods(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance))
+                {
+                    if(m.Name!="AddEntry") continue;
+                    var p=m.GetParameters();
+                    if(p.Length<2) continue;
+                    try
+                    {
+                        var args=new object[p.Length];
+                        args[0]=ConvertArg(key,p[0].ParameterType);
+                        args[1]=ConvertArg(text,p[1].ParameterType);
+                        for(int i=2;i<p.Length;i++) args[i]=p[i].HasDefaultValue?p[i].DefaultValue:null;
+                        entry=m.Invoke(table,args);
+                        if(entry!=null) break;
+                    }
+                    catch { }
+                }
+                if(entry==null)
+                {
+                    // key may already exist: try GetEntry
+                    foreach(var m in table.GetType().GetMethods(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance))
+                    {
+                        if(m.Name!="GetEntry") continue;
+                        var p=m.GetParameters(); if(p.Length!=1) continue;
+                        try { entry=m.Invoke(table,new[]{ConvertArg(key,p[0].ParameterType)}); if(entry!=null) break; } catch { }
+                    }
+                }
+                if(entry==null) return null;
+
+                var tableRef=GetMember(table,"TableCollectionName","TableCollectionNameReference");
+                var keyId=GetMember(entry,"KeyId","Key");
+                var lsType=FindType("UnityEngine.Localization.LocalizedString");
+                if(lsType==null) return null;
+
+                foreach(var ctor in lsType.GetConstructors(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance))
+                {
+                    var p=ctor.GetParameters();
+                    if(p.Length!=2) continue;
+                    try
+                    {
+                        var a0=ConvertArg(tableRef,p[0].ParameterType);
+                        var a1=ConvertArg(keyId,p[1].ParameterType);
+                        return ctor.Invoke(new[]{a0,a1});
+                    }
+                    catch { }
+                }
+
+                var ls=Activator.CreateInstance(lsType);
+                if(ls!=null)
+                {
+                    SetMember(ls,"TableReference",tableRef);
+                    SetMember(ls,"TableEntryReference",keyId);
+                }
+                return ls;
+            }
+            catch(Exception ex)
+            {
+                LoggerInstance.Warning("Localization: "+ex.Message);
+                return null;
+            }
+        }
+
+        private static object ConvertArg(object value, Type target)
+        {
+            if(value==null) return null;
+            if(target.IsInstanceOfType(value)) return value;
+            try
+            {
+                foreach(var m in target.GetMethods(BindingFlags.Public|BindingFlags.Static))
+                {
+                    if(m.Name!="op_Implicit"&&m.Name!="op_Explicit") continue;
+                    var p=m.GetParameters();
+                    if(p.Length==1 && p[0].ParameterType.IsInstanceOfType(value))
+                        return m.Invoke(null,new[]{value});
+                }
+            }
+            catch { }
+            try
+            {
+                foreach(var ctor in target.GetConstructors(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance))
+                {
+                    var p=ctor.GetParameters();
+                    if(p.Length!=1) continue;
+                    try
+                    {
+                        object v=value;
+                        if(!p[0].ParameterType.IsInstanceOfType(v))
+                            v=Convert.ChangeType(value,p[0].ParameterType);
+                        return ctor.Invoke(new[]{v});
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            try { return Convert.ChangeType(value,target); } catch { return value; }
+        }
+
+        private bool KeyPressed(string primary,string secondary,string oldPrimary,string oldSecondary)
+        {
+            try
+            {
+                var kt=FindType("UnityEngine.InputSystem.Keyboard");
+                var kb=kt==null?null:GetMember(kt,null,"current");
+                if(kb!=null && (ControlPressed(kb,primary)||ControlPressed(kb,secondary))) return true;
+            }
+            catch { }
+
+            try
+            {
+                var input=FindType("UnityEngine.Input");
+                var keyCode=FindType("UnityEngine.KeyCode");
+                if(input!=null&&keyCode!=null)
+                {
+                    var m=input.GetMethods(BindingFlags.Public|BindingFlags.Static).FirstOrDefault(x=>x.Name=="GetKeyDown"&&x.GetParameters().Length==1&&x.GetParameters()[0].ParameterType==keyCode);
+                    if(m!=null)
+                    {
+                        if((bool)m.Invoke(null,new[]{Enum.Parse(keyCode,oldPrimary)})) return true;
+                        if((bool)m.Invoke(null,new[]{Enum.Parse(keyCode,oldSecondary)})) return true;
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        private static bool ControlPressed(object kb,string prop)
+        {
+            try
+            {
+                var c=GetMember(kb,prop);
+                var v=c==null?null:GetMember(c,"wasPressedThisFrame");
+                return v is bool b&&b;
+            }
+            catch { return false; }
+        }
+
+        private void Show(string text,int seconds)
+        {
+            _status=text;
+            _statusUntil=DateTime.UtcNow.AddSeconds(seconds);
+        }
+
+        private bool EnsureGui()
+        {
+            if(_guiLabel!=null) return true;
+            _rectType=FindType("UnityEngine.Rect");
+            _guiType=FindType("UnityEngine.GUI");
+            if(_rectType==null||_guiType==null) return false;
+            _rectCtor=_rectType.GetConstructor(new[]{typeof(float),typeof(float),typeof(float),typeof(float)});
+            _guiBox=_guiType.GetMethod("Box",BindingFlags.Public|BindingFlags.Static,null,new[]{_rectType,typeof(string)},null);
+            _guiLabel=_guiType.GetMethod("Label",BindingFlags.Public|BindingFlags.Static,null,new[]{_rectType,typeof(string)},null);
+            return _rectCtor!=null&&_guiLabel!=null;
+        }
+        private object Rect(float x,float y,float w,float h)=>_rectCtor.Invoke(new object[]{x,y,w,h});
+
+        // ---------------- reflection helpers ----------------
+
+        private static Type FindType(string full)
+        {
+            if(string.IsNullOrEmpty(full)) return null;
+            var t=Type.GetType(full);
+            if(t!=null) return t;
+            foreach(var a in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                try { t=a.GetType(full,false); if(t!=null) return t; } catch { }
+            }
+            return null;
+        }
+
+        private static Type FindTypeBySimpleName(string name)
+        {
+            foreach(var a in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                try
+                {
+                    foreach(var t in a.GetTypes())
+                        if(t!=null&&t.Name==name) return t;
+                }
+                catch(ReflectionTypeLoadException ex)
+                {
+                    foreach(var t in ex.Types)
+                        if(t!=null&&t.Name==name) return t;
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        private static object GetMember(object obj, params string[] names)
+            => obj==null?null:GetMember(obj.GetType(),obj,names);
+
+        private static object GetMember(Type type, object instance, params string[] names)
+        {
+            if(type==null) return null;
+            const BindingFlags f=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.Static;
+            foreach(var name in names)
+            {
+                try { var p=type.GetProperty(name,f); if(p!=null) return p.GetValue(instance); } catch { }
+                try { var fi=type.GetField(name,f); if(fi!=null) return fi.GetValue(instance); } catch { }
+            }
+            return null;
+        }
+
+        private static bool SetMember(object obj,string name,object value)
+        {
+            if(obj==null) return false;
+            return SetMember(obj.GetType(),obj,name,value);
+        }
+
+        private static bool SetMember(Type type,object instance,string name,object value)
+        {
+            const BindingFlags f=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.Static;
+            try
+            {
+                var p=type.GetProperty(name,f);
+                if(p!=null&&p.CanWrite){p.SetValue(instance,ConvertArg(value,p.PropertyType));return true;}
+            }catch{}
+            try
+            {
+                var fi=type.GetField(name,f);
+                if(fi!=null){fi.SetValue(instance,ConvertArg(value,fi.FieldType));return true;}
+            }catch{}
+            return false;
+        }
+
+        private static string GetString(object obj,params string[] names)
+        {
+            var v=GetMember(obj,names);
+            return v==null?null:v.ToString();
+        }
+
+        private static float Num(object o)
+        {
+            if(o==null) return 0;
+            try{return Convert.ToSingle(o);}catch{return 0;}
+        }
+
+        private static object InstantiateObject(object original)
+        {
+            if(original==null)return null;
+            var uo=FindType("UnityEngine.Object");
+            if(uo==null)return null;
+            foreach(var m in uo.GetMethods(BindingFlags.Public|BindingFlags.Static))
+            {
+                if(m.Name!="Instantiate"||m.IsGenericMethod)continue;
+                var p=m.GetParameters();
+                if(p.Length!=1)continue;
+                try{return m.Invoke(null,new[]{original});}catch{}
+            }
+            return null;
+        }
+
+        private static object InstantiateAt(object original,object pos,object rot)
+        {
+            if(original==null)return null;
+            var uo=FindType("UnityEngine.Object");
+            foreach(var m in uo.GetMethods(BindingFlags.Public|BindingFlags.Static))
+            {
+                if(m.Name!="Instantiate"||m.IsGenericMethod)continue;
+                var p=m.GetParameters();
+                if(p.Length!=3)continue;
+                if(p[1].ParameterType.Name!="Vector3"||p[2].ParameterType.Name!="Quaternion")continue;
+                try{return m.Invoke(null,new[]{original,pos,rot});}catch{}
+            }
+            return null;
+        }
+
+        private static object GetComponent(object go,Type componentType)
+        {
+            if(go==null||componentType==null)return null;
+            foreach(var m in go.GetType().GetMethods(BindingFlags.Public|BindingFlags.Instance))
+            {
+                if(m.Name!="GetComponent"||m.IsGenericMethod)continue;
+                var p=m.GetParameters();
+                if(p.Length==1&&p[0].ParameterType==typeof(Type))
+                { try{return m.Invoke(go,new object[]{componentType});}catch{} }
+            }
+            return null;
+        }
+
+        private static IEnumerable<object> GetComponentsInChildren(object go,Type componentType)
+        {
+            if(go==null||componentType==null)yield break;
+            foreach(var m in go.GetType().GetMethods(BindingFlags.Public|BindingFlags.Instance))
+            {
+                if(m.Name!="GetComponentsInChildren")continue;
+                if(!m.IsGenericMethod)
+                {
+                    var p=m.GetParameters();
+                    if(p.Length==2&&p[0].ParameterType==typeof(Type)&&p[1].ParameterType==typeof(bool))
+                    {
+                        object arr=null;try{arr=m.Invoke(go,new object[]{componentType,true});}catch{}
+                        if(arr is IEnumerable en)foreach(var x in en)if(x!=null)yield return x;
+                        yield break;
+                    }
+                }
+            }
+            foreach(var m in go.GetType().GetMethods(BindingFlags.Public|BindingFlags.Instance))
+            {
+                if(m.Name!="GetComponentsInChildren"||!m.IsGenericMethodDefinition)continue;
+                var p=m.GetParameters();
+                if(p.Length==1&&p[0].ParameterType==typeof(bool))
+                {
+                    object arr=null;try{arr=m.MakeGenericMethod(componentType).Invoke(go,new object[]{true});}catch{}
+                    if(arr is IEnumerable en)foreach(var x in en)if(x!=null)yield return x;
+                    yield break;
+                }
+            }
+        }
+
+        private static IEnumerable<object> FindAllResources(Type type)
+        {
+            if(type==null)yield break;
+            var r=FindType("UnityEngine.Resources");
+            if(r==null)yield break;
+            foreach(var m in r.GetMethods(BindingFlags.Public|BindingFlags.Static))
+            {
+                if(m.Name!="FindObjectsOfTypeAll"||m.IsGenericMethod)continue;
+                var p=m.GetParameters();
+                if(p.Length==1&&p[0].ParameterType==typeof(Type))
+                {
+                    object arr=null;try{arr=m.Invoke(null,new object[]{type});}catch{}
+                    if(arr is IEnumerable en)foreach(var x in en)if(x!=null)yield return x;
+                    yield break;
+                }
+            }
+        }
+
+        private static object FindFirstResource(Type type)
+        {
+            foreach(var x in FindAllResources(type)) return x;
+            return null;
+        }
+
+        private static object FirstOf(object collection)
+        {
+            if(collection is IEnumerable en)foreach(var x in en)if(x!=null)return x;
+            return null;
+        }
+
+        private static object InvokeBest(object obj,string name,params object[] args)
+        {
+            if(obj==null)return null;
+            const BindingFlags f=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.Static;
+            foreach(var m in obj.GetType().GetMethods(f))
+            {
+                if(m.Name!=name)continue;
+                var p=m.GetParameters();
+                if(p.Length!=args.Length)continue;
+                try
+                {
+                    var converted=new object[args.Length];
+                    for(int i=0;i<args.Length;i++)converted[i]=ConvertArg(args[i],p[i].ParameterType);
+                    return m.Invoke(obj,converted);
+                }catch{}
+            }
+            return null;
+        }
+
+        private static object TryCall(object obj,string name,params object[] args)=>InvokeBest(obj,name,args);
+
+        private static bool DictContains(object dict,object key)
+        {
+            if(dict==null)return false;
+            try
+            {
+                var m=dict.GetType().GetMethods().FirstOrDefault(x=>x.Name=="ContainsKey"&&x.GetParameters().Length==1);
+                return m!=null&&(bool)m.Invoke(dict,new[]{key});
+            }catch{return false;}
+        }
+
+        private static void DictAddIfMissing(object dict,object key,object value)
+        {
+            if(dict==null||DictContains(dict,key))return;
+            DictAdd(dict,key,value);
+        }
+
+        private static void DictAdd(object dict,object key,object value)
+        {
+            if(dict==null)return;
+            foreach(var m in dict.GetType().GetMethods())
+            {
+                if(m.Name!="Add"||m.GetParameters().Length!=2)continue;
+                try
+                {
+                    var p=m.GetParameters();
+                    m.Invoke(dict,new[]{ConvertArg(key,p[0].ParameterType),ConvertArg(value,p[1].ParameterType)});
+                    return;
+                }catch{}
+            }
+        }
+
+        private static int DictCount(object dict)
+        {
+            if(dict==null)return 0;
+            var v=GetMember(dict,"Count");
+            try{return Convert.ToInt32(v);}catch{return 0;}
+        }
+
+        private static void AppendMemberCollection(object owner,string member,object value)
+        {
+            if(owner==null)return;
+            var current=GetMember(owner,member);
+            if(current==null)return;
+            if(CollectionContains(current,value))return;
+
+            if(TryCollectionAdd(current,value))return;
+
+            var vals=new List<object>();
+            if(current is IEnumerable en)foreach(var x in en)vals.Add(x);
+            vals.Add(value);
+            var repl=CreateCollection(current.GetType(),vals);
+            if(repl!=null)SetMember(owner,member,repl);
+        }
+
+        private static void ClearMemberCollection(object owner,string member)
+        {
+            if(owner==null)return;
+            var current=GetMember(owner,member);
+            if(current==null)return;
+            var repl=CreateCollection(current.GetType(),new List<object>());
+            if(repl!=null)SetMember(owner,member,repl);
+        }
+
+        private static void AddToLiveCollection(object collection,object value)
+        {
+            if(collection==null||value==null)return;
+            if(CollectionContains(collection,value))return;
+            TryCollectionAdd(collection,value);
+        }
+
+        private static bool CollectionContains(object collection,object value)
+        {
+            if(collection==null)return false;
+            try
+            {
+                var m=collection.GetType().GetMethods().FirstOrDefault(x=>x.Name=="Contains"&&x.GetParameters().Length==1);
+                if(m!=null)return (bool)m.Invoke(collection,new[]{value});
+            }catch{}
+            if(collection is IEnumerable en)foreach(var x in en)if(x!=null&&(ReferenceEquals(x,value)||x.Equals(value)))return true;
+            return false;
+        }
+
+        private static bool TryCollectionAdd(object collection,object value)
+        {
+            if(collection==null)return false;
+            foreach(var m in collection.GetType().GetMethods())
+            {
+                if(m.Name!="Add"||m.GetParameters().Length!=1)continue;
+                try{m.Invoke(collection,new[]{ConvertArg(value,m.GetParameters()[0].ParameterType)});return true;}catch{}
+            }
+            return false;
+        }
+
+        private static object CreateCollection(Type t,List<object> vals)
+        {
+            if(t==null)return null;
+            try
+            {
+                if(t.IsArray)
+                {
+                    var et=t.GetElementType();
+                    var arr=Array.CreateInstance(et,vals.Count);
+                    for(int i=0;i<vals.Count;i++)arr.SetValue(ConvertArg(vals[i],et),i);
+                    return arr;
+                }
+
+                object obj=null;
+                foreach(var arg in new object[]{vals.Count,(long)vals.Count})
+                {
+                    try{obj=Activator.CreateInstance(t,new[]{arg});if(obj!=null)break;}catch{}
+                }
+                if(obj==null)return null;
+
+                var item=t.GetProperty("Item",BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
+                if(item!=null&&item.CanWrite)
+                {
+                    var ix=item.GetIndexParameters();
+                    for(int i=0;i<vals.Count;i++)
+                    {
+                        object idx=(ix.Length>0&&ix[0].ParameterType==typeof(long))?(object)(long)i:i;
+                        try{item.SetValue(obj,ConvertArg(vals[i],item.PropertyType),new[]{idx});}catch{}
+                    }
+                    return obj;
+                }
+
+                for(int i=0;i<vals.Count;i++)TryCollectionAdd(obj,vals[i]);
+                return obj;
+            }catch{return null;}
+        }
+    }
+}
