@@ -4,526 +4,350 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using MelonLoader;
+using CustomSlimeCreator.Core;
 
-[assembly: MelonInfo(typeof(SR1LegacyBridge.ModEntry), "SR1 Legacy Slimes Bridge", "1.0.0", "Hei Games Studio")]
+[assembly: MelonInfo(typeof(SR1LegacyBridge.ModEntry), "SR1 Legacy Slimes Bridge", "2.0.0", "Hei Games Studio")]
 [assembly: MelonGame("MonomiPark", "SlimeRancher2")]
 
 namespace SR1LegacyBridge
 {
     public sealed class ModEntry : MelonMod
     {
-        private Type _engineType;
-        private Type _configType;
-        private Type _colType;
-        private Type _storeType;
-        private Type _gameAccessType;
-        private bool _built;
+        private readonly Dictionary<string, SlimeConfig> _configs =
+            new Dictionary<string, SlimeConfig>(StringComparer.OrdinalIgnoreCase);
+
+        private bool _savedConfigs;
+        private bool _builtOnce;
         private int _frames;
-        private DateTime _nextTry = DateTime.MinValue;
-        private readonly Dictionary<string, object> _configs = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        private readonly Random _rng = new Random();
 
         public override void OnInitializeMelon()
         {
-            LoggerInstance.Msg("SR1 Legacy Slimes Bridge v1.0.0 carregado.");
-            LoggerInstance.Msg("Usa o Custom Slime Maker como motor de registro/save/Vacpack e cria Rad, Quantum e Mosaic a partir do Pink.");
+            BuildConfigs();
+            LoggerInstance.Msg("SR1 Legacy Slimes Bridge v2.0.0 carregado.");
+            LoggerInstance.Msg("Base: 3 clones independentes do Pink. 8=Rad | 9=Quantum | 0=Mosaic.");
+            LoggerInstance.Msg("Spawn usa o motor do Custom Slime Maker, que cria o slime 3m na frente da camera.");
         }
 
         public override void OnUpdate()
         {
             _frames++;
 
-            if (!_built && DateTime.UtcNow >= _nextTry)
+            // Persist the three presets once. CSM can then rebuild them on later sessions too.
+            if (!_savedConfigs && _frames > 30)
             {
-                _nextTry = DateTime.UtcNow.AddSeconds(1);
-                TryBuildAll();
+                try
+                {
+                    foreach (var cfg in _configs.Values)
+                        ConfigStore.Save(cfg);
+                    _savedConfigs = true;
+                    LoggerInstance.Msg("Presets SR1 salvos no Custom Slime Maker.");
+                }
+                catch (Exception ex)
+                {
+                    LoggerInstance.Warning("Salvar presets: " + ex.Message);
+                }
             }
 
-            if (_built)
+            // Pre-build when the actual save is ready, but key presses do NOT depend on this flag.
+            if (!_builtOnce && _frames % 60 == 0)
+                TryBuildAll();
+
+            if (KeyPressed("digit8Key","numpad8Key","Alpha8","Keypad8"))
+                SpawnNow("Rad");
+
+            if (KeyPressed("digit9Key","numpad9Key","Alpha9","Keypad9"))
+                SpawnNow("Quantum");
+
+            if (KeyPressed("digit0Key","numpad0Key","Alpha0","Keypad0"))
+                SpawnNow("Mosaic");
+
+            // Recreated SR1-style runtime behavior.
+            TickQuantumSuperposition();
+            TickMosaicGlints();
+            TickRadAuraPulse();
+        }
+
+        private void BuildConfigs()
+        {
+            // All three use the SR2 Pink slime as the structural/model base.
+            // Colors/effects are adapted from the SR1 assets supplied by the user.
+
+            var rad = NewPinkClone(
+                "Rad", "Rad Slime",
+                new Col(112,255,126),
+                new Col(48,190,67),
+                new Col(14,108,31),
+                new Col(103,255,118));
+            rad.FoodGroups = new List<string> { "VeggieGroup" };
+            rad.RadAuraEffect = true;
+            rad.SupportRadiant = true;
+
+            var quantum = NewPinkClone(
+                "Quantum", "Quantum Slime",
+                new Col(255,239,102),
+                new Col(247,190,43),
+                new Col(215,126,19),
+                new Col(255,226,82));
+            quantum.FoodGroups = new List<string> { "FruitGroup" };
+            // SR1 Quantum had shifting/superposition visuals. TwinEffect gives a phase-like
+            // body treatment; actual position jumping is recreated below.
+            quantum.TwinEffect = true;
+            quantum.SupportRadiant = true;
+
+            var mosaic = NewPinkClone(
+                "Mosaic", "Mosaic Slime",
+                new Col(166,232,255),
+                new Col(70,151,236),
+                new Col(125,66,210),
+                new Col(130,213,255));
+            mosaic.FoodGroups = new List<string> { "VeggieGroup" };
+            // Smooth/prismatic look is reinforced at runtime by the glint pulse below.
+            mosaic.TwinEffect = true;
+            mosaic.SupportRadiant = true;
+
+            _configs["Rad"] = rad;
+            _configs["Quantum"] = quantum;
+            _configs["Mosaic"] = mosaic;
+        }
+
+        private static SlimeConfig NewPinkClone(
+            string name, string display,
+            Col top, Col middle, Col bottom, Col vac)
+        {
+            return new SlimeConfig
             {
-                if (KeyPressed("digit8Key","numpad8Key","Alpha8","Keypad8")) Spawn("Rad");
-                if (KeyPressed("digit9Key","numpad9Key","Alpha9","Keypad9")) Spawn("Quantum");
-                if (KeyPressed("digit0Key","numpad0Key","Alpha0","Keypad0")) Spawn("Mosaic");
-            }
+                Name = name,
+                DisplayName = display,
+                BasePreset = "Pink",
+
+                Top = top,
+                Middle = middle,
+                Bottom = bottom,
+                Vac = vac,
+
+                // First stable stage: three real species, no plorts/largos yet.
+                HasPlort = false,
+                CanLargofy = false,
+                CreateAllLargos = false,
+
+                Vaccable = true,
+                EdibleByTarrs = true,
+                SinkInShallowWater = true,
+
+                FavoriteFoods = new List<string>(),
+                SpawnZones = new List<string>()
+            };
         }
 
         private void TryBuildAll()
         {
             try
             {
-                if (!ResolveCSM())
+                if (!SlimeEngine.EnsureReady())
                     return;
 
-                if (!ForceCSMReady())
-                    return;
-
-                var rad = CreateConfig(
-                    "Rad", "Rad Slime",
-                    88, 255, 102,
-                    25, 177, 48,
-                    7, 103, 29,
-                    94, 255, 112
-                );
-                SetField(rad, "HasPlort", false);
-                SetField(rad, "CanLargofy", false);
-                SetField(rad, "CreateAllLargos", false);
-                SetField(rad, "FoodGroups", new List<string>{"VeggieGroup"});
-                SetField(rad, "RadAuraEffect", true);
-                SetField(rad, "SupportRadiant", true);
-
-                var quantum = CreateConfig(
-                    "Quantum", "Quantum Slime",
-                    255, 246, 116,
-                    246, 204, 58,
-                    219, 143, 21,
-                    255, 229, 89
-                );
-                SetField(quantum, "HasPlort", false);
-                SetField(quantum, "CanLargofy", false);
-                SetField(quantum, "CreateAllLargos", false);
-                SetField(quantum, "FoodGroups", new List<string>{"FruitGroup"});
-                SetField(quantum, "TwinEffect", true);
-                SetField(quantum, "SupportRadiant", true);
-
-                var mosaic = CreateConfig(
-                    "Mosaic", "Mosaic Slime",
-                    160, 233, 255,
-                    82, 164, 239,
-                    130, 72, 218,
-                    128, 214, 255
-                );
-                SetField(mosaic, "HasPlort", false);
-                SetField(mosaic, "CanLargofy", false);
-                SetField(mosaic, "CreateAllLargos", false);
-                SetField(mosaic, "FoodGroups", new List<string>{"VeggieGroup"});
-                SetField(mosaic, "TwinEffect", true);
-                SetField(mosaic, "SupportRadiant", true);
-
-                bool a = BuildAndSave(rad);
-                bool b = BuildAndSave(quantum);
-                bool c = BuildAndSave(mosaic);
-
-                if (!(a && b && c))
-                    return;
-
-                _configs["Rad"] = rad;
-                _configs["Quantum"] = quantum;
-                _configs["Mosaic"] = mosaic;
-
-                ApplyLegacyShader("Rad", new[]{
-                    "SR/AMP/Slime/Body/Rad",
-                    "SlimeBody_rad",
-                    "SR/AMP/Slime/Body/Rad/Normal"
-                });
-
-                ApplyLegacyShader("Quantum", new[]{
-                    "SR/AMP/Slime/Body/Quantum",
-                    "SlimeBody_quantum",
-                    "SR/AMP/Slime/Body/QuantumTimeOverride"
-                });
-
-                ApplyLegacyShader("Mosaic", new[]{
-                    "SR/AMP/Slime/Mosaic",
-                    "MosaicSlime",
-                    "SR/Slime/Mosaic"
-                });
-
-                _built = true;
-                LoggerInstance.Msg("PRONTO: Rad, Quantum e Mosaic foram criados como 3 clones independentes do Pink.");
-                LoggerInstance.Msg("Spawn manual: 8 = Rad | 9 = Quantum | 0 = Mosaic");
-            }
-            catch (Exception ex)
-            {
-                LoggerInstance.Warning("Build SR1 slimes: " + ex);
-            }
-        }
-
-        private bool ResolveCSM()
-        {
-            if (_engineType != null) return true;
-
-            _engineType = FindType("CustomSlimeCreator.Core.SlimeEngine");
-            _configType = FindType("CustomSlimeCreator.Core.SlimeConfig");
-            _colType = FindType("CustomSlimeCreator.Core.Col");
-            _storeType = FindType("CustomSlimeCreator.Core.ConfigStore");
-            _gameAccessType = FindType("CustomSlimeCreator.Core.GameAccess");
-
-            if (_engineType == null || _configType == null || _colType == null || _storeType == null || _gameAccessType == null)
-            {
-                if (_frames % 300 == 0)
-                    LoggerInstance.Warning("CustomSlimeCreator.dll não encontrado. Instale o Custom Slime Maker v1.0.2 em Mods.");
-                return false;
-            }
-
-            return true;
-        }
-
-        // CSM 1.0.2 waits for >= 40 SlimeDefinition resources.
-        // Some current Xbox/1.3.0 scenes expose fewer despite the save already being active.
-        // We preserve every REAL definition found, then pad the private cache with Pink references
-        // only to satisfy that old readiness threshold. Registration itself is still done by CSM.
-        private bool ForceCSMReady()
-        {
-            try
-            {
-                var gcProp = _gameAccessType.GetProperty("GC", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static);
-                var gc = gcProp?.GetValue(null);
-                if (gc == null) return false;
-
-                var slimeDefType = FindTypeBySimpleName("SlimeDefinition");
-                var resourcesType = FindType("UnityEngine.Resources");
-                if (slimeDefType == null || resourcesType == null) return false;
-
-                object raw = null;
-                foreach (var m in resourcesType.GetMethods(BindingFlags.Public|BindingFlags.Static))
+                bool all = true;
+                foreach (var cfg in _configs.Values)
                 {
-                    if (m.Name != "FindObjectsOfTypeAll" || !m.IsGenericMethodDefinition || m.GetParameters().Length != 0)
-                        continue;
-                    try { raw = m.MakeGenericMethod(slimeDefType).Invoke(null, null); break; } catch { }
-                }
-
-                if (!(raw is IEnumerable en)) return false;
-
-                var real = new List<object>();
-                object pink = null;
-
-                foreach (var d in en)
-                {
-                    if (d == null) continue;
-                    real.Add(d);
-                    var rid = GetString(d, "ReferenceId", "referenceId");
-                    var name = GetString(d, "name", "Name");
-                    if (pink == null &&
-                        (string.Equals(rid, "SlimeDefinition.Pink", StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(name, "Pink", StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(name, "PinkSlime", StringComparison.OrdinalIgnoreCase)))
-                        pink = d;
-                }
-
-                if (pink == null || real.Count < 3) return false;
-
-                var listType = typeof(List<>).MakeGenericType(slimeDefType);
-                var list = Activator.CreateInstance(listType);
-                var add = listType.GetMethod("Add");
-
-                foreach (var d in real)
-                    add.Invoke(list, new[]{d});
-
-                while ((int)listType.GetProperty("Count").GetValue(list) < 40)
-                    add.Invoke(list, new[]{pink});
-
-                var allDefs = _engineType.GetField("_allDefs", BindingFlags.NonPublic|BindingFlags.Static);
-                allDefs?.SetValue(null, list);
-
-                var readyProp = _engineType.GetProperty("Ready", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static);
-                if (readyProp != null)
-                {
-                    var setter = readyProp.GetSetMethod(true);
-                    if (setter != null) setter.Invoke(null, new object[]{true});
-                    else
+                    if (!SlimeEngine.BuildOrUpdate(cfg, out var error))
                     {
-                        var bf = _engineType.GetField("<Ready>k__BackingField", BindingFlags.NonPublic|BindingFlags.Static);
-                        bf?.SetValue(null, true);
+                        all = false;
+                        LoggerInstance.Warning(cfg.Name + " build: " + (error ?? "erro desconhecido"));
                     }
                 }
 
-                // Supply a SlimeAppearanceDirector if CSM has not cached one yet.
-                var directorField = _engineType.GetField("_director", BindingFlags.NonPublic|BindingFlags.Static);
-                if (directorField != null && directorField.GetValue(null) == null)
+                if (all)
                 {
-                    var dirType = FindTypeBySimpleName("SlimeAppearanceDirector");
-                    if (dirType != null)
-                    {
-                        object chosen = null;
-                        object arr = null;
-                        foreach (var m in resourcesType.GetMethods(BindingFlags.Public|BindingFlags.Static))
-                        {
-                            if (m.Name != "FindObjectsOfTypeAll" || !m.IsGenericMethodDefinition || m.GetParameters().Length != 0) continue;
-                            try { arr = m.MakeGenericMethod(dirType).Invoke(null, null); break; } catch { }
-                        }
-                        if (arr is IEnumerable dirs)
-                        {
-                            foreach (var d in dirs)
-                            {
-                                if (d == null) continue;
-                                if (chosen == null) chosen = d;
-                                if (string.Equals(GetString(d, "name"), "MainSlimeAppearanceDirector", StringComparison.OrdinalIgnoreCase))
-                                { chosen = d; break; }
-                            }
-                        }
-                        if (chosen != null) directorField.SetValue(null, chosen);
-                    }
+                    _builtOnce = true;
+                    LoggerInstance.Msg("3 NOVOS SLIMES PRONTOS: Rad, Quantum e Mosaic. Todos clonados do Pink.");
                 }
-
-                return true;
             }
             catch (Exception ex)
             {
-                LoggerInstance.Warning("ForceCSMReady: " + ex.Message);
-                return false;
+                LoggerInstance.Warning("Build: " + ex);
             }
         }
 
-        private object CreateConfig(
-            string name, string display,
-            byte tr, byte tg, byte tb,
-            byte mr, byte mg, byte mb,
-            byte br, byte bg, byte bb,
-            byte vr, byte vg, byte vb)
-        {
-            var cfg = Activator.CreateInstance(_configType);
-
-            SetField(cfg, "Name", name);
-            SetField(cfg, "DisplayName", display);
-            SetField(cfg, "BasePreset", "Pink");
-
-            SetField(cfg, "Top", MakeCol(tr,tg,tb));
-            SetField(cfg, "Middle", MakeCol(mr,mg,mb));
-            SetField(cfg, "Bottom", MakeCol(br,bg,bb));
-            SetField(cfg, "Vac", MakeCol(vr,vg,vb));
-
-            SetField(cfg, "Vaccable", true);
-            SetField(cfg, "EdibleByTarrs", true);
-            SetField(cfg, "SinkInShallowWater", true);
-
-            return cfg;
-        }
-
-        private object MakeCol(byte r, byte g, byte b)
-        {
-            foreach (var ctor in _colType.GetConstructors(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance))
-            {
-                var p = ctor.GetParameters();
-                if (p.Length == 3 &&
-                    p[0].ParameterType == typeof(byte) &&
-                    p[1].ParameterType == typeof(byte) &&
-                    p[2].ParameterType == typeof(byte))
-                    return ctor.Invoke(new object[]{r,g,b});
-            }
-
-            var col = Activator.CreateInstance(_colType);
-            SetField(col, "r", r);
-            SetField(col, "g", g);
-            SetField(col, "b", b);
-            return col;
-        }
-
-        private bool BuildAndSave(object cfg)
-        {
-            try
-            {
-                var build = _engineType.GetMethod("BuildOrUpdate", BindingFlags.Public|BindingFlags.Static);
-                if (build == null) return false;
-
-                var args = new object[]{cfg, null};
-                var ok = (bool)build.Invoke(null, args);
-                var error = args[1]?.ToString();
-
-                if (!ok)
-                {
-                    LoggerInstance.Warning("Custom Slime Maker recusou o slime: " + (error ?? "erro desconhecido"));
-                    return false;
-                }
-
-                var save = _storeType.GetMethod("Save", BindingFlags.Public|BindingFlags.Static);
-                save?.Invoke(null, new[]{cfg});
-                return true;
-            }
-            catch (TargetInvocationException tie)
-            {
-                LoggerInstance.Warning("BuildAndSave: " + (tie.InnerException ?? tie));
-                return false;
-            }
-            catch (Exception ex)
-            {
-                LoggerInstance.Warning("BuildAndSave: " + ex);
-                return false;
-            }
-        }
-
-        private void Spawn(string key)
+        private void SpawnNow(string key)
         {
             if (!_configs.TryGetValue(key, out var cfg))
                 return;
 
             try
             {
-                var spawn = _engineType.GetMethod("Spawn", BindingFlags.Public|BindingFlags.Static);
-                if (spawn == null) return;
-
-                var args = new object[]{cfg, null};
-                var ok = (bool)spawn.Invoke(null, args);
-                var error = args[1]?.ToString();
-
-                if (!ok)
-                    LoggerInstance.Warning("Spawn " + key + ": " + (error ?? "falhou"));
-                else
+                // Do not silently ignore the key anymore.
+                if (!SlimeEngine.EnsureReady())
                 {
-                    ApplyLegacyShader(key, ShaderCandidates(key));
-                    LoggerInstance.Msg(key + " spawnado.");
-                }
-            }
-            catch (Exception ex)
-            {
-                LoggerInstance.Warning("Spawn " + key + ": " + ex.Message);
-            }
-        }
-
-        private string[] ShaderCandidates(string key)
-        {
-            if (key.Equals("Rad", StringComparison.OrdinalIgnoreCase))
-                return new[]{"SR/AMP/Slime/Body/Rad","SlimeBody_rad","SR/AMP/Slime/Body/Rad/Normal"};
-            if (key.Equals("Quantum", StringComparison.OrdinalIgnoreCase))
-                return new[]{"SR/AMP/Slime/Body/Quantum","SlimeBody_quantum","SR/AMP/Slime/Body/QuantumTimeOverride"};
-            return new[]{"SR/AMP/Slime/Mosaic","MosaicSlime","SR/Slime/Mosaic"};
-        }
-
-        private void ApplyLegacyShader(string key, string[] candidates)
-        {
-            try
-            {
-                var builtField = _engineType.GetField("Built", BindingFlags.NonPublic|BindingFlags.Static);
-                var built = builtField?.GetValue(null);
-                if (built == null) return;
-
-                object cs = DictGet(built, key);
-                if (cs == null) return;
-
-                var app = GetMember(cs, "App");
-                if (app == null) return;
-
-                var shaderType = FindType("UnityEngine.Shader");
-                if (shaderType == null) return;
-
-                object shader = null;
-                var find = shaderType.GetMethods(BindingFlags.Public|BindingFlags.Static)
-                    .FirstOrDefault(m => m.Name == "Find" && m.GetParameters().Length == 1 &&
-                                         m.GetParameters()[0].ParameterType == typeof(string));
-
-                if (find != null)
-                {
-                    foreach (var n in candidates)
-                    {
-                        try
-                        {
-                            shader = find.Invoke(null, new object[]{n});
-                            if (shader != null) break;
-                        }
-                        catch { }
-                    }
-                }
-
-                if (shader == null)
-                {
-                    LoggerInstance.Msg(key + ": shader legado SR2 não localizado; mantendo shader do Pink com a paleta SR1.");
+                    LoggerInstance.Warning("TECLA " + key + ": Custom Slime Maker ainda não reconheceu o mundo carregado.");
                     return;
                 }
 
-                var structures = GetMember(app, "Structures", "_structures");
-                if (!(structures is IEnumerable en)) return;
-
-                int changed = 0;
-                foreach (var s in en)
+                if (!SlimeEngine.BuildOrUpdate(cfg, out var buildError))
                 {
-                    if (s == null) continue;
-
-                    var element = GetMember(s, "Element");
-                    var typeName = GetMember(element, "Type")?.ToString() ?? "";
-                    if (!typeName.Equals("BODY", StringComparison.OrdinalIgnoreCase) &&
-                        !typeName.Equals("SURFACE", StringComparison.OrdinalIgnoreCase))
-                        continue;
-
-                    var mats = GetMember(s, "DefaultMaterials");
-                    if (!(mats is IEnumerable men)) continue;
-
-                    foreach (var mat in men)
-                    {
-                        if (mat == null) continue;
-                        if (SetMember(mat, "shader", shader))
-                            changed++;
-                        EnhanceMaterial(key, mat);
-                    }
+                    LoggerInstance.Warning("TECLA " + key + " build: " + (buildError ?? "falhou"));
+                    return;
                 }
 
-                LoggerInstance.Msg(key + ": shader legado aplicado a " + changed + " material(is).");
+                // CSM Spawn places the actor at Camera.main.position + forward*3 + up*0.5.
+                if (!SlimeEngine.Spawn(cfg, out var spawnError))
+                {
+                    LoggerInstance.Warning("TECLA " + key + " spawn: " + (spawnError ?? "falhou"));
+                    return;
+                }
+
+                LoggerInstance.Msg("SPAWN OK: " + cfg.DisplayName + " nasceu NA SUA FRENTE.");
             }
             catch (Exception ex)
             {
-                LoggerInstance.Warning("Visual " + key + ": " + ex.Message);
+                LoggerInstance.Warning("Spawn " + key + ": " + ex);
             }
         }
 
-        private void EnhanceMaterial(string key, object mat)
-        {
-            if (mat == null) return;
+        // -----------------------------------------------------------------
+        // SR1 BEHAVIOR PORTS (adapted to SR2 runtime)
+        // -----------------------------------------------------------------
 
-            if (key.Equals("Rad", StringComparison.OrdinalIgnoreCase))
+        // SR1 concept: QuantumSlimeSuperposition.
+        // Every few seconds, a quantum slime has a chance to shift to a nearby possible position.
+        private void TickQuantumSuperposition()
+        {
+            if (_frames % 360 != 0) return; // roughly every few seconds
+            if (_rng.NextDouble() > 0.45) return;
+
+            foreach (var go in GetInstances("Quantum"))
             {
-                EnableKeyword(mat, "_EMISSION");
-                SetMaterialFloat(mat, "_EmissionStrength", 1.4f);
-            }
-            else if (key.Equals("Quantum", StringComparison.OrdinalIgnoreCase))
-            {
-                EnableKeyword(mat, "_EMISSION");
-                SetMaterialFloat(mat, "_EmissionStrength", 0.65f);
-            }
-            else if (key.Equals("Mosaic", StringComparison.OrdinalIgnoreCase))
-            {
-                SetMaterialFloat(mat, "_Metallic", 0.45f);
-                SetMaterialFloat(mat, "_Smoothness", 0.90f);
+                try
+                {
+                    var tr = GetMember(go, "transform");
+                    var pos = GetMember(tr, "position");
+                    if (tr == null || pos == null) continue;
+
+                    float x = ToFloat(GetMember(pos, "x"));
+                    float y = ToFloat(GetMember(pos, "y"));
+                    float z = ToFloat(GetMember(pos, "z"));
+
+                    float dx = (float)(_rng.NextDouble() * 4.0 - 2.0);
+                    float dz = (float)(_rng.NextDouble() * 4.0 - 2.0);
+
+                    var vecType = pos.GetType();
+                    var next = Activator.CreateInstance(vecType, new object[] { x + dx, y + 0.15f, z + dz });
+                    SetMember(tr, "position", next);
+                }
+                catch { }
             }
         }
 
-        private void EnableKeyword(object mat, string keyword)
+        // SR1 concept: MosaicAttractor / GlintController.
+        // Pulse the custom slime's materials to create the characteristic bright glassy glint.
+        private void TickMosaicGlints()
         {
+            if (_frames % 20 != 0) return;
+
+            float wave = (float)((Math.Sin(_frames * 0.11) + 1.0) * 0.5);
+            float emission = 0.35f + wave * 1.35f;
+
+            foreach (var go in GetInstances("Mosaic"))
+            {
+                foreach (var mat in GetMaterials(go))
+                {
+                    SetMaterialFloat(mat, "_Metallic", 0.45f);
+                    SetMaterialFloat(mat, "_Smoothness", 0.90f);
+                    SetMaterialFloat(mat, "_EmissionStrength", emission);
+                    EnableKeyword(mat, "_EMISSION");
+                }
+            }
+        }
+
+        // SR1 concept: RadSlimeExpand / RadSource.
+        // The CSM RadAuraEffect supplies the aura body element when available.
+        // This pulse keeps the green aura/body visibly energetic on the SR2 Pink model.
+        private void TickRadAuraPulse()
+        {
+            if (_frames % 20 != 0) return;
+
+            float wave = (float)((Math.Sin(_frames * 0.08) + 1.0) * 0.5);
+            float emission = 0.8f + wave * 1.0f;
+
+            foreach (var go in GetInstances("Rad"))
+            {
+                foreach (var mat in GetMaterials(go))
+                {
+                    EnableKeyword(mat, "_EMISSION");
+                    SetMaterialFloat(mat, "_EmissionStrength", emission);
+                }
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // CSM instance access
+        // -----------------------------------------------------------------
+
+        private IEnumerable<object> GetInstances(string key)
+        {
+            object built = null;
             try
             {
-                var m = mat.GetType().GetMethods(BindingFlags.Public|BindingFlags.Instance)
-                    .FirstOrDefault(x => x.Name == "EnableKeyword" && x.GetParameters().Length == 1 &&
-                                         x.GetParameters()[0].ParameterType == typeof(string));
-                m?.Invoke(mat, new object[]{keyword});
+                var f = typeof(SlimeEngine).GetField("Built", BindingFlags.NonPublic | BindingFlags.Static);
+                built = f?.GetValue(null);
             }
             catch { }
+
+            if (built == null) yield break;
+
+            object custom = DictGet(built, key);
+            if (custom == null) yield break;
+
+            var instances = GetMember(custom, "Instances");
+            if (!(instances is IEnumerable en)) yield break;
+
+            foreach (var go in en)
+                if (go != null) yield return go;
         }
 
-        private void SetMaterialFloat(object mat, string property, float value)
+        private IEnumerable<object> GetMaterials(object go)
         {
-            try
-            {
-                var has = mat.GetType().GetMethods(BindingFlags.Public|BindingFlags.Instance)
-                    .FirstOrDefault(x => x.Name == "HasProperty" && x.GetParameters().Length == 1 &&
-                                         x.GetParameters()[0].ParameterType == typeof(string));
-                if (has != null && !(bool)has.Invoke(mat, new object[]{property})) return;
+            if (go == null) yield break;
 
-                var m = mat.GetType().GetMethods(BindingFlags.Public|BindingFlags.Instance)
-                    .FirstOrDefault(x => x.Name == "SetFloat" && x.GetParameters().Length == 2 &&
-                                         x.GetParameters()[0].ParameterType == typeof(string));
-                if (m != null)
-                    m.Invoke(mat, new object[]{property, Convert.ChangeType(value, m.GetParameters()[1].ParameterType)});
+            var rendererType = FindType("UnityEngine.Renderer");
+            if (rendererType == null) yield break;
+
+            foreach (var renderer in GetComponentsInChildren(go, rendererType))
+            {
+                var mats = GetMember(renderer, "materials");
+                if (mats is IEnumerable en)
+                    foreach (var mat in en)
+                        if (mat != null) yield return mat;
             }
-            catch { }
         }
 
-        private object DictGet(object dict, object key)
+        // -----------------------------------------------------------------
+        // Reflection helpers only for Unity runtime/input/material access.
+        // CSM itself is called DIRECTLY, not through reflection.
+        // -----------------------------------------------------------------
+
+        private static object DictGet(object dict, object key)
         {
             if (dict == null) return null;
+
             try
             {
-                var item = dict.GetType().GetProperty("Item", BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance);
-                if (item != null)
-                    return item.GetValue(dict, new[]{key});
+                var item = dict.GetType().GetProperty("Item", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (item != null) return item.GetValue(dict, new[] { key });
             }
             catch { }
 
-            foreach (var m in dict.GetType().GetMethods(BindingFlags.Public|BindingFlags.Instance))
+            foreach (var m in dict.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
             {
                 if (m.Name != "TryGetValue" || m.GetParameters().Length != 2) continue;
                 try
                 {
-                    var args = new object[]{key, null};
+                    var args = new object[] { key, null };
                     if ((bool)m.Invoke(dict, args)) return args[1];
                 }
                 catch { }
             }
+
             return null;
         }
 
@@ -531,109 +355,197 @@ namespace SR1LegacyBridge
         {
             var t = Type.GetType(fullName);
             if (t != null) return t;
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                try { t = asm.GetType(fullName, false); if (t != null) return t; } catch { }
-            }
-            return null;
-        }
 
-        private static Type FindTypeBySimpleName(string name)
-        {
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
                 try
                 {
-                    foreach (var t in asm.GetTypes())
-                        if (t != null && t.Name == name) return t;
-                }
-                catch (ReflectionTypeLoadException ex)
-                {
-                    foreach (var t in ex.Types)
-                        if (t != null && t.Name == name) return t;
+                    t = asm.GetType(fullName, false);
+                    if (t != null) return t;
                 }
                 catch { }
             }
+
             return null;
         }
 
-        private static object GetMember(object obj, params string[] names)
+        private static object GetMember(object obj, string name)
         {
             if (obj == null) return null;
-            const BindingFlags f = BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.Static|BindingFlags.DeclaredOnly;
+
+            const BindingFlags flags =
+                BindingFlags.Public | BindingFlags.NonPublic |
+                BindingFlags.Instance | BindingFlags.Static |
+                BindingFlags.DeclaredOnly;
+
             for (var t = obj.GetType(); t != null; t = t.BaseType)
             {
-                foreach (var n in names)
+                try
                 {
-                    try { var p = t.GetProperty(n, f); if (p != null) return p.GetValue(obj); } catch { }
-                    try { var fi = t.GetField(n, f); if (fi != null) return fi.GetValue(obj); } catch { }
+                    var p = t.GetProperty(name, flags);
+                    if (p != null) return p.GetValue(obj);
                 }
+                catch { }
+
+                try
+                {
+                    var f = t.GetField(name, flags);
+                    if (f != null) return f.GetValue(obj);
+                }
+                catch { }
             }
+
             return null;
-        }
-
-        private static string GetString(object obj, params string[] names)
-        {
-            return GetMember(obj, names)?.ToString();
-        }
-
-        private static bool SetField(object obj, string name, object value)
-        {
-            if (obj == null) return false;
-            for (var t = obj.GetType(); t != null; t = t.BaseType)
-            {
-                var f = t.GetField(name, BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.DeclaredOnly);
-                if (f == null) continue;
-                try { f.SetValue(obj, value); return true; } catch { return false; }
-            }
-            return false;
         }
 
         private static bool SetMember(object obj, string name, object value)
         {
             if (obj == null) return false;
-            const BindingFlags f = BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.Static|BindingFlags.DeclaredOnly;
+
+            const BindingFlags flags =
+                BindingFlags.Public | BindingFlags.NonPublic |
+                BindingFlags.Instance | BindingFlags.Static |
+                BindingFlags.DeclaredOnly;
+
             for (var t = obj.GetType(); t != null; t = t.BaseType)
             {
                 try
                 {
-                    var p = t.GetProperty(name, f);
-                    if (p != null && p.CanWrite) { p.SetValue(obj, value); return true; }
+                    var p = t.GetProperty(name, flags);
+                    if (p != null && p.CanWrite)
+                    {
+                        p.SetValue(obj, value);
+                        return true;
+                    }
                 }
                 catch { }
 
                 try
                 {
-                    var fi = t.GetField(name, f);
-                    if (fi != null) { fi.SetValue(obj, value); return true; }
+                    var f = t.GetField(name, flags);
+                    if (f != null)
+                    {
+                        f.SetValue(obj, value);
+                        return true;
+                    }
                 }
                 catch { }
             }
+
             return false;
+        }
+
+        private static IEnumerable<object> GetComponentsInChildren(object go, Type componentType)
+        {
+            if (go == null || componentType == null) yield break;
+
+            foreach (var m in go.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (m.Name != "GetComponentsInChildren" || !m.IsGenericMethodDefinition) continue;
+
+                object result = null;
+                try
+                {
+                    var gm = m.MakeGenericMethod(componentType);
+                    var p = m.GetParameters();
+
+                    if (p.Length == 1 && p[0].ParameterType == typeof(bool))
+                        result = gm.Invoke(go, new object[] { true });
+                    else if (p.Length == 0)
+                        result = gm.Invoke(go, null);
+                }
+                catch { }
+
+                if (result is IEnumerable en)
+                {
+                    foreach (var x in en)
+                        if (x != null) yield return x;
+                    yield break;
+                }
+            }
+        }
+
+        private static void EnableKeyword(object mat, string keyword)
+        {
+            if (mat == null) return;
+            try
+            {
+                var m = mat.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(x =>
+                        x.Name == "EnableKeyword" &&
+                        x.GetParameters().Length == 1 &&
+                        x.GetParameters()[0].ParameterType == typeof(string));
+                m?.Invoke(mat, new object[] { keyword });
+            }
+            catch { }
+        }
+
+        private static void SetMaterialFloat(object mat, string property, float value)
+        {
+            if (mat == null) return;
+
+            try
+            {
+                var has = mat.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(x =>
+                        x.Name == "HasProperty" &&
+                        x.GetParameters().Length == 1 &&
+                        x.GetParameters()[0].ParameterType == typeof(string));
+
+                if (has != null && !(bool)has.Invoke(mat, new object[] { property }))
+                    return;
+
+                var set = mat.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(x =>
+                        x.Name == "SetFloat" &&
+                        x.GetParameters().Length == 2 &&
+                        x.GetParameters()[0].ParameterType == typeof(string));
+
+                if (set != null)
+                {
+                    var t = set.GetParameters()[1].ParameterType;
+                    set.Invoke(mat, new object[] { property, Convert.ChangeType(value, t) });
+                }
+            }
+            catch { }
+        }
+
+        private static float ToFloat(object value)
+        {
+            try { return Convert.ToSingle(value); }
+            catch { return 0f; }
         }
 
         private bool KeyPressed(string newA, string newB, string oldA, string oldB)
         {
+            // New Input System
             try
             {
                 var keyboardType = FindType("UnityEngine.InputSystem.Keyboard");
                 var keyboard = keyboardType == null ? null : GetStaticMember(keyboardType, "current");
-                if (keyboard != null && (ControlPressed(keyboard, newA) || ControlPressed(keyboard, newB)))
+
+                if (keyboard != null &&
+                    (ControlPressed(keyboard, newA) || ControlPressed(keyboard, newB)))
                     return true;
             }
             catch { }
 
+            // Legacy Input fallback
             try
             {
                 var inputType = FindType("UnityEngine.Input");
                 var keyType = FindType("UnityEngine.KeyCode");
-                var get = inputType?.GetMethods(BindingFlags.Public|BindingFlags.Static)
-                    .FirstOrDefault(m => m.Name == "GetKeyDown" && m.GetParameters().Length == 1 &&
-                                         m.GetParameters()[0].ParameterType == keyType);
+
+                var get = inputType?.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                    .FirstOrDefault(m =>
+                        m.Name == "GetKeyDown" &&
+                        m.GetParameters().Length == 1 &&
+                        m.GetParameters()[0].ParameterType == keyType);
+
                 if (get != null)
                 {
-                    if ((bool)get.Invoke(null, new[]{Enum.Parse(keyType, oldA)})) return true;
-                    if ((bool)get.Invoke(null, new[]{Enum.Parse(keyType, oldB)})) return true;
+                    if ((bool)get.Invoke(null, new[] { Enum.Parse(keyType, oldA) })) return true;
+                    if ((bool)get.Invoke(null, new[] { Enum.Parse(keyType, oldB) })) return true;
                 }
             }
             catch { }
@@ -644,18 +556,21 @@ namespace SR1LegacyBridge
         private static object GetStaticMember(Type type, string name)
         {
             if (type == null) return null;
+
             try
             {
-                var p = type.GetProperty(name, BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static);
+                var p = type.GetProperty(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
                 if (p != null) return p.GetValue(null);
             }
             catch { }
+
             try
             {
-                var f = type.GetField(name, BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static);
+                var f = type.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
                 if (f != null) return f.GetValue(null);
             }
             catch { }
+
             return null;
         }
 
