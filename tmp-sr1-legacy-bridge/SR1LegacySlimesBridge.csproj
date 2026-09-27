@@ -17,5 +17,9 @@
       <HintPath>$(MelonLoaderDir)/MelonLoader.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="CustomSlimeCreator">
+      <HintPath>$(CSMDir)/CustomSlimeCreator.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 </Project>
