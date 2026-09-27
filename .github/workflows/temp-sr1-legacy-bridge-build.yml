@@ -6,7 +6,7 @@ on:
       - 'tmp-sr1-legacy-bridge/**'
       - '.github/workflows/temp-sr1-legacy-bridge-build.yml'
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,10 +27,29 @@ jobs:
           mkdir -p csm
           curl -L --fail -o csm/CustomSlimeCreator.dll https://github.com/AlkaPrime12/Custom-Slime-Maker/releases/download/v1.0.2/CustomSlimeCreator.dll
           echo "CSM_DIR=$GITHUB_WORKSPACE/csm" >> "$GITHUB_ENV"
+
       - name: Build
         run: dotnet build tmp-sr1-legacy-bridge/SR1LegacySlimesBridge.csproj -c Release -p:MelonLoaderDir="$MELON_DIR" -p:CSMDir="$CSM_DIR"
+
+      - name: Prepare direct DLL
+        shell: bash
+        run: |
+          cp tmp-sr1-legacy-bridge/bin/Release/net6.0/SR1LegacySlimesBridge.dll SR1LegacySlimesBridge_v2_0.dll
+
       - uses: actions/upload-artifact@v4
         with:
           name: SR1LegacySlimesBridge-v2
-          path: tmp-sr1-legacy-bridge/bin/Release/net6.0/SR1LegacySlimesBridge.dll
+          path: SR1LegacySlimesBridge_v2_0.dll
           if-no-files-found: error
+
+      - name: Publish direct-download release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="sr1-legacy-bridge-v2.0"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" SR1LegacySlimesBridge_v2_0.dll --clobber
+          else
+            gh release create "$TAG" SR1LegacySlimesBridge_v2_0.dll               --title "SR1 Legacy Slimes Bridge v2.0"               --notes "3 Pink-based SR2 species: Rad, Quantum, Mosaic. Keys 8/9/0 spawn them in front of the player. Requires Custom Slime Maker v1.0.2."
+          fi
