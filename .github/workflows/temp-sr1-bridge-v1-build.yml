@@ -1,0 +1,32 @@
+name: temp-sr1-bridge-v1-build
+on:
+  push:
+    branches: [tmp-sr2-spawner-build]
+    paths:
+      - 'tmp-sr1-bridge-v1/**'
+      - '.github/workflows/temp-sr1-bridge-v1-build.yml'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+      - name: Download MelonLoader
+        shell: bash
+        run: |
+          curl -L --fail -o melon.zip https://github.com/LavaGang/MelonLoader/releases/download/v0.7.3/MelonLoader.x64.zip
+          unzip -q melon.zip -d melon
+          MLDLL="$(find "$GITHUB_WORKSPACE/melon" -path '*/net6/MelonLoader.dll' | head -n 1)"
+          test -n "$MLDLL"
+          echo "MELON_DIR=$(dirname "$MLDLL")" >> "$GITHUB_ENV"
+      - name: Build
+        run: dotnet build tmp-sr1-bridge-v1/SR1LegacySlimesBridge.csproj -c Release -p:MelonLoaderDir="$MELON_DIR"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SR1LegacySlimesBridge-v1.1
+          path: tmp-sr1-bridge-v1/bin/Release/net6.0/SR1LegacySlimesBridge.dll
+          if-no-files-found: error
