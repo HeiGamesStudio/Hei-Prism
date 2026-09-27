@@ -15,7 +15,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '6.0.x'
-      - name: Download MelonLoader
+      - name: Download dependencies
         shell: bash
         run: |
           curl -L --fail -o melon.zip https://github.com/LavaGang/MelonLoader/releases/download/v0.7.3/MelonLoader.x64.zip
@@ -23,10 +23,14 @@ jobs:
           MLDLL="$(find "$GITHUB_WORKSPACE/melon" -path '*/net6/MelonLoader.dll' | head -n 1)"
           test -n "$MLDLL"
           echo "MELON_DIR=$(dirname "$MLDLL")" >> "$GITHUB_ENV"
+
+          mkdir -p csm
+          curl -L --fail -o csm/CustomSlimeCreator.dll https://github.com/AlkaPrime12/Custom-Slime-Maker/releases/download/v1.0.2/CustomSlimeCreator.dll
+          echo "CSM_DIR=$GITHUB_WORKSPACE/csm" >> "$GITHUB_ENV"
       - name: Build
-        run: dotnet build tmp-sr1-legacy-bridge/SR1LegacySlimesBridge.csproj -c Release -p:MelonLoaderDir="$MELON_DIR"
+        run: dotnet build tmp-sr1-legacy-bridge/SR1LegacySlimesBridge.csproj -c Release -p:MelonLoaderDir="$MELON_DIR" -p:CSMDir="$CSM_DIR"
       - uses: actions/upload-artifact@v4
         with:
-          name: SR1LegacySlimesBridge
+          name: SR1LegacySlimesBridge-v2
           path: tmp-sr1-legacy-bridge/bin/Release/net6.0/SR1LegacySlimesBridge.dll
           if-no-files-found: error
