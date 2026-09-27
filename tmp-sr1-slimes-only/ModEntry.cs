@@ -477,7 +477,7 @@ Plorts Mosaico são valorizados por suas propriedades ópticas e pela estrutura 
                 var go=TryActorSpawn(def,pos,rot)??InstantiateAt(prefab,pos,rot);
                 if(go==null){Show("Falha ao spawnar "+key,4);return;}
 
-                TryCall(go,"SetActive",true);
+                InvokeBest(go,"SetActive",true);
                 WirePrefab(go,def);
                 var spec=_specs.First(x=>x.Key.Equals(key,StringComparison.OrdinalIgnoreCase));
                 RecolorGameObject(go,spec);
