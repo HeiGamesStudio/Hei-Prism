@@ -5,7 +5,7 @@ using System.Linq;
 using System.Reflection;
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(SR1SlimesOnly.ModEntry), "SR1 Slimes Only", "0.8.0", "Hei Games Studio")]
+[assembly: MelonInfo(typeof(SR1SlimesOnly.ModEntry), "SR1 Slimes Only", "0.9.0", "Hei Games Studio")]
 [assembly: MelonGame("MonomiPark", "SlimeRancher2")]
 
 namespace SR1SlimesOnly
@@ -93,8 +93,8 @@ Plorts Mosaico são valorizados por suas propriedades ópticas e pela estrutura 
 
         public override void OnInitializeMelon()
         {
-            LoggerInstance.Msg("SR1 Slimes Only v0.8 iniciado.");
-            LoggerInstance.Msg("Somente espécies + Slimepedia + spawn manual. Sem plorts, dieta própria, largos ou spawn natural.");
+            LoggerInstance.Msg("SR1 Slimes Only v0.9 iniciado.");
+            LoggerInstance.Msg("Espécies reais + Vacpack + Slimepedia/Slimes + spawn manual. Sem plorts, largos ou spawn natural.");
             TryBootstrap();
         }
 
@@ -180,9 +180,10 @@ Plorts Mosaico são valorizados por suas propriedades ópticas e pela estrutura 
             if(def==null)return null;
             Pin(def);
             SetMember(def,"name","SR1"+spec.Key+"Slime");
+            SetMember(def,"Name",spec.Key);
             ForceReferenceId(def,spec.RefId);
+            SetMember(def,"PediaPersistenceSuffix",spec.PediaSuffix);
             SetMember(def,"_pediaPersistenceSuffix",spec.PediaSuffix);
-            SetMember(def,"pediaPersistenceSuffix",spec.PediaSuffix);
             SetMember(def,"CanLargofy",false);
 
             var icon=BuildIcon(spec.IconMode);
@@ -214,10 +215,12 @@ Plorts Mosaico são valorizados por suas propriedades ópticas e pela estrutura 
             var basePrefab=GetMember(_pink,"prefab","Prefab");
             var prefab=InstantiateObject(basePrefab);
             if(prefab==null)return null;
-            Pin(prefab);
+            KeepGameObjectAlive(prefab);
+            InvokeBest(prefab,"SetActive",false);
             SetMember(prefab,"name","SR1"+spec.Key+"SlimePrefab");
             SetMember(def,"prefab",prefab);
             WirePrefab(prefab,def);
+            EnableBehaviours(prefab);
             RecolorGameObject(prefab,spec);
 
             RegisterDefinition(gc,def,spec);
@@ -335,14 +338,15 @@ Plorts Mosaico são valorizados por suas propriedades ópticas e pela estrutura 
                 if(groupType!=null)
                 {
                     var wanted=new HashSet<string>(StringComparer.OrdinalIgnoreCase){
-                        "BaseSlimeGroup","VaccableBaseSlimeGroup","SlimesGroup","SmallSlimeGroup",
-                        "EdibleSlimeGroup","IdentifiableTypesGroup","SlimesSinkInShallowWaterGroup"
+                        "BaseSlimeGroup","VaccableBaseSlimeGroup","VaccableNonLiquids","SlimesGroup",
+                        "SmallSlimeGroup","EdibleSlimeGroup","IdentifiableTypesGroup",
+                        "SlimesSinkInShallowWaterGroup"
                     };
                     foreach(var g in FindAllResources(groupType))
                     {
                         var n=GetString(g,"name","Name");
                         if(n!=null&&wanted.Contains(n))
-                            InvokeBest(lookup,"AddIdentifiableTypeToGroup",def,g);
+                            AddToIdentGroup(lookup,g,def);
                     }
                 }
 
@@ -355,6 +359,16 @@ Plorts Mosaico são valorizados por suas propriedades ópticas e pela estrutura 
             }
         }
 
+        private void AddToIdentGroup(object lookup,object group,object def)
+        {
+            if(group==null||def==null)return;
+            InvokeBest(lookup,"AddIdentifiableTypeToGroup",def,group);
+            TryAdd(GetMember(group,"_memberTypes","ImmediateMemberTypes"),def);
+            var runtime=InvokeBest(group,"GetRuntimeObject");
+            if(runtime!=null)
+                TryAdd(GetMember(runtime,"_memberTypes","MemberTypes"),def);
+        }
+
         private void EnsureSaveRegistration(object gc,object def,Spec spec)
         {
             RegisterDefinition(gc,def,spec);
@@ -362,79 +376,100 @@ Plorts Mosaico são valorizados por suas propriedades ópticas e pela estrutura 
 
         private void TryInstallPedia()
         {
-            if(!_ready)return;
+            if(!_ready || _pediaReady)return;
             try
             {
                 var entryType=FindTypeBySimpleName("IdentifiablePediaEntry");
                 var categoryType=FindTypeBySimpleName("PediaCategory");
                 if(entryType==null||categoryType==null)return;
 
-                object category=null;
-                foreach(var c in FindAllResources(categoryType))
-                {
-                    if(string.Equals(GetString(c,"name","Name"),"Slimes",StringComparison.OrdinalIgnoreCase))
-                    {category=c;break;}
-                }
-                if(category==null)return;
-
                 object pinkEntry=null;
                 foreach(var e in FindAllResources(entryType))
                 {
                     var id=GetMember(e,"_identifiableType","IdentifiableType");
                     if(id!=null&&_pink!=null&&(ReferenceEquals(id,_pink)||id.Equals(_pink)))
-                    {pinkEntry=e;break;}
+                    { pinkEntry=e; break; }
                 }
+                if(pinkEntry==null)return;
 
+                object category=null;
+                foreach(var c in FindAllResources(categoryType))
+                {
+                    var items=GetMember(c,"_items","RawItems");
+                    if(CollectionContains(items,pinkEntry))
+                    { category=c; break; }
+                }
+                if(category==null)return;
+
+                var sceneType=FindTypeBySimpleName("SceneContext");
+                var scene=sceneType==null?null:GetStaticMember(sceneType,"Instance");
+                var director=scene==null?null:GetMember(scene,"PediaDirector");
+                var gc=GetGameContext();
+                var lookup=gc==null?null:GetMember(gc,"LookupDirector");
+
+                int installed=0;
                 foreach(var spec in _specs)
                 {
                     var def=_defs[spec.Key];
                     object entry=null;
-                    foreach(var e in FindAllResources(entryType))
+
+                    if(director!=null)
+                        entry=InvokeBest(director,"GetEntry",def);
+
+                    if(entry==null)
                     {
-                        var id=GetMember(e,"_identifiableType","IdentifiableType");
-                        if(id!=null&&(ReferenceEquals(id,def)||id.Equals(def)))
-                        {entry=e;break;}
+                        foreach(var e in FindAllResources(entryType))
+                        {
+                            var id=GetMember(e,"_identifiableType","IdentifiableType");
+                            if(id!=null&&(ReferenceEquals(id,def)||id.Equals(def)))
+                            { entry=e; break; }
+                        }
                     }
 
                     if(entry==null)
                     {
-                        entry=CreateScriptable(entryType);
+                        entry=InstantiateObject(pinkEntry);
                         if(entry==null)continue;
                         Pin(entry);
-                        SetMember(entry,"name",GetString(def,"name","Name")??("SR1"+spec.Key+"Slime"));
+                        SetMember(entry,"name","SR1"+spec.Key+"Slime");
                         SetMember(entry,"_identifiableType",def);
                         SetMember(entry,"_title",GetMember(def,"localizedName"));
                         var desc=MakeLocalized("Pedia","sr1slimes.pedia."+spec.Key.ToLowerInvariant(),spec.Description);
                         if(desc!=null)SetMember(entry,"_description",desc);
                         SetMember(entry,"_isUnlockedInitially",true);
-
-                        if(pinkEntry!=null)
-                        {
-                            var h=GetMember(pinkEntry,"_highlightSet");
-                            if(h!=null)SetMember(entry,"_highlightSet",h);
-                        }
                         EmptyCollectionMember(entry,"_details");
                     }
 
                     AppendCollection(category,"_items",entry);
+                    if(lookup!=null)InvokeBest(lookup,"AddPediaEntryToCategory",entry,category);
+
                     var runtime=InvokeBest(category,"GetRuntimeCategory");
                     if(runtime!=null)TryAdd(GetMember(runtime,"_items","Items"),entry);
 
-                    var gc=GetGameContext();
-                    var lookup=GetMember(gc,"LookupDirector");
-                    if(lookup!=null)InvokeBest(lookup,"AddPediaEntryToCategory",entry,category);
+                    if(director!=null)
+                    {
+                        DictSet(GetMember(director,"_customIdentToEntryMap"),def,entry);
+                        DictSet(GetMember(director,"_identDict"),def,entry);
+                    }
 
                     Unlock(entry,def);
+
+                    var check=director==null?entry:InvokeBest(director,"GetEntry",def);
+                    if(check!=null && CollectionContains(GetMember(category,"_items","RawItems"),entry))
+                        installed++;
                 }
 
-                _pediaReady=true;
-                _status="Slimepedia pronta: Rad, Quântico e Mosaico em SLIMES, já desbloqueados.";
-                _until=DateTime.UtcNow.AddSeconds(10);
-                LoggerInstance.Msg("3 entradas IdentifiablePediaEntry adicionadas à categoria Slimes.");
+                if(installed==3)
+                {
+                    _pediaReady=true;
+                    _status="Slimepedia pronta: Rad, Quântico e Mosaico estão em SLIMES e desbloqueados.";
+                    _until=DateTime.UtcNow.AddSeconds(10);
+                    LoggerInstance.Msg("Slimepedia verificada: 3/3 entradas estão na categoria real de Slimes.");
+                }
             }
             catch(Exception ex)
             {
-                LoggerInstance.Warning("Pedia: "+ex.Message);
+                LoggerInstance.Warning("Pedia: "+ex);
             }
         }
 
@@ -477,15 +512,24 @@ Plorts Mosaico são valorizados por suas propriedades ópticas e pela estrutura 
                 var go=TryActorSpawn(def,pos,rot)??InstantiateAt(prefab,pos,rot);
                 if(go==null){Show("Falha ao spawnar "+key,4);return;}
 
-                InvokeBest(go,"SetActive",true);
                 WirePrefab(go,def);
+                EnableBehaviours(go);
+                InvokeBest(go,"SetActive",true);
+
                 var spec=_specs.First(x=>x.Key.Equals(key,StringComparison.OrdinalIgnoreCase));
                 RecolorGameObject(go,spec);
 
                 var appType=FindTypeBySimpleName("SlimeAppearanceApplicator");
                 var app=appType==null?null:GetComponent(go,appType);
+                InvokeBest(app,"Initialize",false);
                 InvokeBest(app,"ApplyAppearance");
 
+                var identType=FindTypeBySimpleName("IdentifiableActor");
+                var ident=identType==null?null:GetComponent(go,identType);
+                InvokeBest(ident,"RegistryUpdate");
+
+                var actual=GetMember(ident,"identType");
+                LoggerInstance.Msg("Spawn "+spec.Key+": ident="+(GetString(actual,"ReferenceId","referenceId")??GetString(actual,"name","Name")??"NULL"));
                 Show(spec.Display+" spawnado. 8 Rad | 9 Quântico | 0 Mosaico",3);
             }
             catch(Exception ex)
@@ -584,23 +628,56 @@ Plorts Mosaico são valorizados por suas propriedades ópticas e pela estrutura 
         private void WirePrefab(object go,object def)
         {
             if(go==null||def==null)return;
-            var appType=FindTypeBySimpleName("SlimeAppearanceApplicator");
-            var identType=FindTypeBySimpleName("IdentifiableActor");
-            var eatType=FindTypeBySimpleName("SlimeEat");
 
-            var a=appType==null?null:GetComponent(go,appType);
-            if(a!=null)
+            var appType=FindTypeBySimpleName("SlimeAppearanceApplicator");
+            var identActorType=FindTypeBySimpleName("IdentifiableActor");
+            var eatType=FindTypeBySimpleName("SlimeEat");
+            var vacType=FindTypeBySimpleName("Vacuumable");
+
+            var app=appType==null?null:GetComponent(go,appType);
+            var ident=identActorType==null?null:GetComponent(go,identActorType);
+            var eat=eatType==null?null:GetComponent(go,eatType);
+            var vac=vacType==null?null:GetComponent(go,vacType);
+
+            if(ident!=null)
+                SetMember(ident,"identType",def);
+
+            if(app!=null)
             {
-                SetMember(a,"SlimeDefinition",def);
+                SetMember(app,"SlimeDefinition",def);
                 var first=FirstOf(GetMember(def,"AppearancesDefault"));
-                if(first!=null)SetMember(a,"Appearance",first);
+                if(first!=null)SetMember(app,"Appearance",first);
             }
 
-            var ia=identType==null?null:GetComponent(go,identType);
-            if(ia!=null)SetMember(ia,"identType",def);
+            if(eat!=null)
+                SetMember(eat,"SlimeDefinition",def);
 
-            var eat=eatType==null?null:GetComponent(go,eatType);
-            if(eat!=null)SetMember(eat,"SlimeDefinition",def);
+            if(vac!=null)
+            {
+                if(ident!=null)SetMember(vac,"_identifiable",ident);
+                if(app!=null)SetMember(vac,"_slimeAppearanceApplicator",app);
+                SetMember(vac,"enabled",true);
+            }
+        }
+
+        private void EnableBehaviours(object go)
+        {
+            var behaviour=FindType("UnityEngine.Behaviour");
+            if(behaviour==null)return;
+            foreach(var b in GetComponentsInChildren(go,behaviour))
+                SetMember(b,"enabled",true);
+        }
+
+        private void KeepGameObjectAlive(object go)
+        {
+            if(go==null)return;
+            try
+            {
+                var u=FindType("UnityEngine.Object");
+                var m=u?.GetMethods(BindingFlags.Public|BindingFlags.Static)
+                    .FirstOrDefault(x=>x.Name=="DontDestroyOnLoad"&&x.GetParameters().Length==1);
+                m?.Invoke(null,new[]{go});
+            }catch{}
         }
 
         private object BuildIcon(int mode)
@@ -915,19 +992,27 @@ Plorts Mosaico são valorizados por suas propriedades ópticas e pela estrutura 
         private static object GetStaticMember(Type t,params string[] names)=>GetMemberCore(t,null,names);
         private static object GetMemberCore(Type t,object inst,params string[] names)
         {
-            if(t==null)return null;var f=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.Static;
-            foreach(var n in names)
+            if(t==null)return null;
+            const BindingFlags f=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.Static|BindingFlags.DeclaredOnly;
+            for(var cur=t;cur!=null;cur=cur.BaseType)
             {
-                try{var p=t.GetProperty(n,f);if(p!=null)return p.GetValue(inst);}catch{}
-                try{var fi=t.GetField(n,f);if(fi!=null)return fi.GetValue(inst);}catch{}
+                foreach(var n in names)
+                {
+                    try{var p=cur.GetProperty(n,f);if(p!=null)return p.GetValue(inst);}catch{}
+                    try{var fi=cur.GetField(n,f);if(fi!=null)return fi.GetValue(inst);}catch{}
+                }
             }
             return null;
         }
         private static bool SetMember(object o,string name,object val)
         {
-            if(o==null)return false;var t=o.GetType();var f=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.Static;
-            try{var p=t.GetProperty(name,f);if(p!=null&&p.CanWrite){p.SetValue(o,ConvertArg(val,p.PropertyType));return true;}}catch{}
-            try{var fi=t.GetField(name,f);if(fi!=null){fi.SetValue(o,ConvertArg(val,fi.FieldType));return true;}}catch{}
+            if(o==null)return false;
+            const BindingFlags f=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.Static|BindingFlags.DeclaredOnly;
+            for(var cur=o.GetType();cur!=null;cur=cur.BaseType)
+            {
+                try{var p=cur.GetProperty(name,f);if(p!=null&&p.CanWrite){p.SetValue(o,ConvertArg(val,p.PropertyType));return true;}}catch{}
+                try{var fi=cur.GetField(name,f);if(fi!=null){fi.SetValue(o,ConvertArg(val,fi.FieldType));return true;}}catch{}
+            }
             return false;
         }
         private static string GetString(object o,params string[] names)=>GetMember(o,names)?.ToString();
