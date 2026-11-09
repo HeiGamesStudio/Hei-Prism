@@ -1,4 +1,4 @@
-name: Valdoria Zombie Fabric 26.3 JAR
+name: Valdoria Zombie Fabric 26.3 JAR v0.2
 on:
   push:
     branches: [valdoria-zumbi-pacifico-build-26.3]
@@ -22,13 +22,17 @@ jobs:
           mkdir -p valdoria-mod
           unzip -q valdoria-zumbi-source.zip -d valdoria-mod
           sed -i 's/modImplementation /implementation /g' valdoria-mod/build.gradle
-          sed -i '/swing(InteractionHand.MAIN_HAND);/d' valdoria-mod/src/main/java/com/valdoria/zumbi/ValdoriaZombie.java
+          cp valdoria-update/ValdoriaZombie.java valdoria-mod/src/main/java/com/valdoria/zumbi/ValdoriaZombie.java
+          sed -i 's/^mod_version=.*/mod_version=0.2.0/' valdoria-mod/gradle.properties
+          sed -i '/\.sized(0.6F, 1.95F)/a\            .fireImmune()' valdoria-mod/src/main/java/com/valdoria/zumbi/ValdoriaZumbiMod.java
+          sed -i 's/Zumbi agressivo invocado!/Zumbi pacifico invocado: assusta aldeoes, nao ataca e nao desaparece!/g' valdoria-mod/src/main/java/com/valdoria/zumbi/ValdoriaZumbiMod.java
+          sed -i 's/Zumbi agressivo invocado exclusivamente por comando no Pacifico, sem nascimento natural de monstros./Zumbi passivo para jogadores, que assusta aldeoes e nunca desaparece no Pacifico./g' valdoria-mod/src/main/resources/fabric.mod.json
       - name: Compile Fabric mod
         working-directory: valdoria-mod
         run: gradle build --stacktrace --no-daemon
       - name: Publish jar artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Valdoria-Zumbi-Pacifico-Fabric-26.3
-          path: valdoria-mod/build/libs/valdoria-zumbi-pacifico-0.1.0.jar
+          name: Valdoria-Zumbi-Assusta-Aldeoes-Fabric-26.3
+          path: valdoria-mod/build/libs/valdoria-zumbi-pacifico-0.2.0.jar
           if-no-files-found: error
