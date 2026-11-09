@@ -21,6 +21,7 @@ jobs:
         run: |
           mkdir -p valdoria-mod
           unzip -q valdoria-zumbi-source.zip -d valdoria-mod
+          sed -i 's/modImplementation /implementation /g' valdoria-mod/build.gradle
       - name: Compile Fabric mod
         working-directory: valdoria-mod
         run: gradle build --stacktrace --no-daemon
