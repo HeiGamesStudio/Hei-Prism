@@ -22,6 +22,7 @@ jobs:
           mkdir -p valdoria-mod
           unzip -q valdoria-zumbi-source.zip -d valdoria-mod
           sed -i 's/modImplementation /implementation /g' valdoria-mod/build.gradle
+          sed -i '/swing(InteractionHand.MAIN_HAND);/d' valdoria-mod/src/main/java/com/valdoria/zumbi/ValdoriaZombie.java
       - name: Compile Fabric mod
         working-directory: valdoria-mod
         run: gradle build --stacktrace --no-daemon
